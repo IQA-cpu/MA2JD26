@@ -1,0 +1,2584 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+// GENERATED from dc-runtime/src/*.ts — do not edit. Rebuild with `cd dc-runtime && bun run build`.
+"use strict";
+(() => {
+  var __defProp = Object.defineProperty;
+  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+
+  // src/react.ts
+  function getReact() {
+    const R = window.React;
+    if (!R) throw new Error("dc-runtime: window.React is not available yet");
+    return R;
+  }
+  function getReactDOM() {
+    const RD = window.ReactDOM;
+    if (!RD) throw new Error("dc-runtime: window.ReactDOM is not available yet");
+    return RD;
+  }
+  var h = ((...args) => getReact().createElement(
+    ...args
+  ));
+
+  // src/parse.ts
+  function parseDcDocument(doc) {
+    const dc = doc.querySelector("x-dc");
+    if (!dc) return null;
+    const scriptEl = doc.querySelector("script[data-dc-script]");
+    const { props, preview } = parseDataProps(
+      scriptEl?.getAttribute("data-props") ?? null
+    );
+    return {
+      template: dc.innerHTML,
+      js: scriptEl ? scriptEl.textContent || "" : "",
+      props,
+      preview
+    };
+  }
+  function parseDcText(src) {
+    const openMatch = /<x-dc(?:\s[^>]*)?>/.exec(src);
+    if (!openMatch) return null;
+    const close = src.lastIndexOf("</x-dc>");
+    if (close === -1 || close < openMatch.index) return null;
+    const template = src.slice(openMatch.index + openMatch[0].length, close);
+    const doc = new DOMParser().parseFromString(src, "text/html");
+    const scriptEl = doc.querySelector("script[data-dc-script]");
+    const { props, preview } = parseDataProps(
+      scriptEl?.getAttribute("data-props") ?? null
+    );
+    return {
+      template,
+      js: scriptEl ? scriptEl.textContent || "" : "",
+      props,
+      preview
+    };
+  }
+  function parseDataProps(raw) {
+    if (!raw) return { props: null, preview: null };
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { props: null, preview: null };
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { props: null, preview: null };
+    }
+    const obj = parsed;
+    const preview = obj.$preview && typeof obj.$preview === "object" ? obj.$preview : null;
+    const rest = {};
+    for (const k of Object.keys(obj)) {
+      if (k[0] !== "$") rest[k] = obj[k];
+    }
+    return { props: Object.keys(rest).length ? rest : null, preview };
+  }
+  function dcNameFromPath(pathname) {
+    let p = pathname || "";
+    try {
+      p = decodeURIComponent(p);
+    } catch {
+    }
+    const base = p.split("/").pop() || "Root";
+    return base.replace(/\.dc\.html$/, "").replace(/\.html?$/, "") || "Root";
+  }
+
+  // src/boot.ts
+  var BASE_CSS = `
+    .sc-placeholder{background:color-mix(in srgb,currentColor 8%,transparent);
+      border:1px solid color-mix(in srgb,currentColor 50%,transparent);
+      border-radius:2px;box-sizing:border-box;overflow:hidden}
+    @keyframes sc-shine{0%{background-position:100% 50%}100%{background-position:0% 50%}}
+    html.sc-dc-streaming .sc-placeholder,
+    html.sc-dc-streaming .sc-interp.sc-missing{position:relative;
+      background:color-mix(in srgb,currentColor 5%,transparent);
+      border-color:transparent}
+    html.sc-dc-streaming .sc-placeholder::before,
+    html.sc-dc-streaming .sc-interp.sc-missing::before{content:'';
+      position:absolute;inset:0;pointer-events:none;
+      background:linear-gradient(90deg,rgba(217,119,87,0) 25%,rgba(247,225,211,.95) 37%,rgba(217,119,87,0) 63%);
+      background-size:400% 100%;animation:sc-shine 1.4s ease infinite}
+    html.sc-dc-streaming .sc-placeholder:nth-child(n+9 of .sc-placeholder)::before,
+    html.sc-dc-streaming .sc-interp.sc-missing:nth-child(n+9 of .sc-interp.sc-missing)::before{animation:none;
+      background:color-mix(in srgb,currentColor 8%,transparent)}
+    .sc-placeholder-error{padding:4px 8px;font:11px/1.4 ui-monospace,monospace;
+      color:color-mix(in srgb,currentColor 70%,transparent);word-break:break-word}
+    .sc-interp.sc-missing{display:inline-block;width:2em;height:1em;overflow:hidden;
+      vertical-align:text-bottom;background:rgba(255,255,255,.3);border:1px solid rgba(0,0,0,.5);
+      border-radius:2px;box-sizing:border-box;color:transparent;
+      user-select:none}
+    .sc-interp.sc-unresolved{font-family:ui-monospace,monospace;font-size:.85em;
+      color:color-mix(in srgb,currentColor 50%,transparent);
+      background:color-mix(in srgb,currentColor 10%,transparent);border-radius:3px;
+      padding:0 3px}
+    .sc-host.sc-has-error{position:relative}
+    .sc-logic-error{position:absolute;top:8px;left:8px;z-index:2147483647;max-width:60ch;
+      padding:6px 10px;background:#b00020;color:#fff;font:12px/1.4 ui-monospace,monospace;
+      border-radius:4px;white-space:pre-wrap;pointer-events:none}
+    /* Mirrors PRINT_BASELINE_CSS in apps/web deck-stage-export.ts \u2014 keep both
+       in sync until dc-runtime regains a build step. */
+    @media print {
+      @page { margin: 0.5cm; }
+      figure, table { break-inside: avoid; }
+      #dc-root, #dc-root > .sc-host { height: auto; }
+      *, *::before, *::after {
+        print-color-adjust: exact; -webkit-print-color-adjust: exact;
+        backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+        animation-delay: -99s !important; animation-duration: .001s !important;
+        animation-iteration-count: 1 !important; animation-fill-mode: both !important;
+        animation-play-state: running !important; transition-duration: 0s !important;
+      }
+    }
+  `;
+  var FULL_PAGE_CSS = "html,body{height:100%;margin:0}#dc-root,#dc-root>.sc-host{height:100%}";
+  function rootNameForDocument(doc, loc) {
+    let bootPath = loc.pathname || "";
+    if (!/\.dc\.html?$/i.test(safeDecode(bootPath))) {
+      try {
+        bootPath = new URL(doc.baseURI || "/").pathname;
+      } catch {
+      }
+    }
+    return dcNameFromPath(bootPath);
+  }
+  function safeDecode(s) {
+    try {
+      return decodeURIComponent(s);
+    } catch {
+      return s;
+    }
+  }
+  function boot(runtime, doc = document) {
+    const parsed = parseDcDocument(doc);
+    if (!parsed) return null;
+    const React = getReact();
+    const rootName = rootNameForDocument(doc, location);
+    runtime.markFetched(rootName);
+    runtime.setRootName(rootName);
+    runtime.adoptParsed(rootName, parsed);
+    fetch(location.href).then((res) => res.ok ? res.text() : "").then((t) => {
+      const raw = t ? parseDcText(t) : null;
+      if (raw?.template) runtime.updateHtml(rootName, raw.template);
+    }).catch(() => {
+    });
+    const dc = doc.querySelector("x-dc");
+    const hostEl = doc.createElement("div");
+    hostEl.id = "dc-root";
+    dc.replaceWith(hostEl);
+    if (!parsed.preview) {
+      const s = doc.createElement("style");
+      s.textContent = FULL_PAGE_CSS;
+      doc.head.appendChild(s);
+    }
+    const Root = runtime.getDC(rootName);
+    const entry = runtime.registry.get(rootName);
+    function StandaloneRoot() {
+      const [, setTick] = React.useState(0);
+      React.useEffect(() => {
+        const sub = () => setTick((n) => n + 1);
+        entry.subs.add(sub);
+        return () => {
+          entry.subs.delete(sub);
+        };
+      }, []);
+      const defaults = React.useMemo(() => {
+        const d = {};
+        for (const k in entry.propsMeta || {}) {
+          const v = entry.propsMeta?.[k]?.default;
+          if (v !== void 0) d[k] = v;
+        }
+        return d;
+      }, [entry.propsMeta]);
+      return h(Root, { ...defaults, ...entry.propOverrides || {} });
+    }
+    const ReactDOM = getReactDOM();
+    if (ReactDOM.createRoot)
+      ReactDOM.createRoot(hostEl).render(h(StandaloneRoot));
+    else ReactDOM.render(h(StandaloneRoot), hostEl);
+    return rootName;
+  }
+
+  // src/expr.ts
+  var IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*/;
+  var NUMBER_RE = /^-?\d+(\.\d+)?$/;
+  function resolve(vals, src) {
+    const expr = String(src).trim();
+    if (!expr) return void 0;
+    if (expr[0] === "(" && expr[expr.length - 1] === ")" && parensWrapWhole(expr)) {
+      return resolve(vals, expr.slice(1, -1));
+    }
+    const eq = findTopLevelEquality(expr);
+    if (eq) {
+      const lv = resolve(vals, expr.slice(0, eq.index));
+      const rv = resolve(vals, expr.slice(eq.index + eq.op.length));
+      switch (eq.op) {
+        case "===":
+          return lv === rv;
+        case "!==":
+          return lv !== rv;
+        case "==":
+          return lv == rv;
+        default:
+          return lv != rv;
+      }
+    }
+    if (expr[0] === "!") return !resolve(vals, expr.slice(1));
+    if (expr === "true") return true;
+    if (expr === "false") return false;
+    if (expr === "null") return null;
+    if (expr === "undefined") return void 0;
+    if (NUMBER_RE.test(expr)) return Number(expr);
+    if (expr.length >= 2 && (expr[0] === '"' || expr[0] === "'") && expr[expr.length - 1] === expr[0]) {
+      return expr.slice(1, -1);
+    }
+    return resolvePath(vals, expr);
+  }
+  function parensWrapWhole(expr) {
+    let depth = 0;
+    for (let i = 0; i < expr.length - 1; i++) {
+      if (expr[i] === "(") depth++;
+      else if (expr[i] === ")") {
+        depth--;
+        if (depth === 0) return false;
+      }
+    }
+    return true;
+  }
+  function findTopLevelEquality(expr) {
+    let depth = 0;
+    for (let i = 0; i < expr.length; i++) {
+      const c = expr[i];
+      if (c === "[" || c === "(") depth++;
+      else if (c === "]" || c === ")") depth--;
+      else if (depth === 0 && (c === "=" || c === "!") && expr[i + 1] === "=") {
+        if (i > 0 && (expr[i - 1] === "=" || expr[i - 1] === "!")) continue;
+        if (!expr.slice(0, i).trim()) continue;
+        const op = expr[i + 2] === "=" ? c + "==" : c + "=";
+        return { index: i, op };
+      }
+    }
+    return null;
+  }
+  function resolvePath(vals, expr) {
+    const head = expr.match(IDENT_RE);
+    if (!head) return void 0;
+    let cur = vals == null ? void 0 : vals[head[0]];
+    let i = head[0].length;
+    while (i < expr.length) {
+      if (expr[i] === ".") {
+        const m = expr.slice(i + 1).match(IDENT_RE) || expr.slice(i + 1).match(/^\d+/);
+        if (!m) return void 0;
+        cur = cur == null ? void 0 : cur[m[0]];
+        i += 1 + m[0].length;
+      } else if (expr[i] === "[") {
+        let depth = 1;
+        let j = i + 1;
+        while (j < expr.length && depth > 0) {
+          if (expr[j] === "[") depth++;
+          else if (expr[j] === "]") {
+            depth--;
+            if (depth === 0) break;
+          }
+          j++;
+        }
+        if (depth !== 0) return void 0;
+        const key = resolve(vals, expr.slice(i + 1, j));
+        cur = cur == null ? void 0 : cur[key];
+        i = j + 1;
+      } else {
+        return void 0;
+      }
+    }
+    return cur;
+  }
+
+  // src/encode.ts
+  var CAMEL_ATTR = "sc-camel-";
+  var INLINE_TEXT_TAGS = new Set(
+    "a abbr b bdi bdo br cite code del dfn em i ins kbd mark q s samp small span strike strong sub sup u var wbr".split(
+      " "
+    )
+  );
+  var RAW_WRAP = {
+    select: "sc-raw-select",
+    table: "sc-raw-table",
+    tbody: "sc-raw-tbody",
+    thead: "sc-raw-thead",
+    tfoot: "sc-raw-tfoot",
+    tr: "sc-raw-tr",
+    td: "sc-raw-td",
+    th: "sc-raw-th",
+    caption: "sc-raw-caption"
+  };
+  var RAW_UNWRAP = Object.fromEntries(
+    Object.entries(RAW_WRAP).map(([k, v]) => [v, k])
+  );
+  var EVENT_MAP = {
+    onclick: "onClick",
+    onchange: "onChange",
+    oninput: "onInput",
+    onsubmit: "onSubmit",
+    onkeydown: "onKeyDown",
+    onkeyup: "onKeyUp",
+    onkeypress: "onKeyPress",
+    onmousedown: "onMouseDown",
+    onmouseup: "onMouseUp",
+    onmouseenter: "onMouseEnter",
+    onmouseleave: "onMouseLeave",
+    onfocus: "onFocus",
+    onblur: "onBlur",
+    ondoubleclick: "onDoubleClick",
+    oncontextmenu: "onContextMenu"
+  };
+  var ATTRS = `(?:[^>"']|"[^"]*"|'[^']*')*`;
+  var IMPORT_SELF_CLOSE_RE = new RegExp(
+    "<(x-import|dc-import)(" + ATTRS + ")/>",
+    "gi"
+  );
+  var CAMEL_ATTR_RE = /(\s)([a-z]+[A-Z][A-Za-z0-9]*)(\s*=)/g;
+  function encodeCase(html) {
+    html = html.replace(
+      IMPORT_SELF_CLOSE_RE,
+      (_, t, a) => "<" + t + a + "></" + t + ">"
+    );
+    html = html.replace(/<helmet(\s|>)/gi, "<sc-helmet$1");
+    html = html.replace(/<\/helmet\s*>/gi, "</sc-helmet>");
+    html = html.replace(
+      CAMEL_ATTR_RE,
+      (_, sp, name, eq) => sp + CAMEL_ATTR + name.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase()) + eq
+    );
+    for (const [real, alias] of Object.entries(RAW_WRAP)) {
+      html = html.replace(
+        new RegExp("(</?)" + real + "(?=[\\s>])", "gi"),
+        "$1" + alias
+      );
+    }
+    return html;
+  }
+  function kebabToCamel(s) {
+    return s.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+  }
+  function cssToObj(css) {
+    const o = {};
+    for (const decl of css.split(";")) {
+      const i = decl.indexOf(":");
+      if (i < 0) continue;
+      const prop = decl.slice(0, i).trim();
+      o[prop.startsWith("--") ? prop : kebabToCamel(prop)] = decl.slice(i + 1).trim();
+    }
+    return o;
+  }
+  function compileAttr(raw) {
+    const whole = raw.match(/^\s*\{\{([\s\S]+?)\}\}\s*$/);
+    if (whole) {
+      const path = whole[1];
+      return (vals) => resolve(vals, path);
+    }
+    if (raw.includes("{{")) {
+      const parts = raw.split(/\{\{([\s\S]+?)\}\}/g);
+      return (vals) => parts.map((s, i) => i & 1 ? resolve(vals, s) ?? "" : s).join("");
+    }
+    return () => raw;
+  }
+
+  // src/compile.ts
+  function collectProps(node, kind, host) {
+    const propGetters = [];
+    const pseudoClasses = [];
+    let hintSize = null;
+    for (const { name, value } of [...node.attributes]) {
+      if (name === "sc-name" || name === "data-dc-tpl") continue;
+      let key = name;
+      if (key.startsWith(CAMEL_ATTR))
+        key = kebabToCamel(key.slice(CAMEL_ATTR.length));
+      if (key === "hint-size") {
+        hintSize = value;
+        continue;
+      }
+      if (key.startsWith("style-")) {
+        pseudoClasses.push(host.pseudoClass(key.slice(6), value));
+        continue;
+      }
+      if (kind !== "dom") {
+        if (key.includes("-") && !(kind === "x-import" && (key.startsWith("aria-") || key.startsWith("data-"))))
+          key = kebabToCamel(key);
+      } else {
+        if (key === "class") key = "className";
+        else if (key === "for") key = "htmlFor";
+        else if (key.startsWith("on"))
+          key = EVENT_MAP[key] || "on" + key[2].toUpperCase() + key.slice(3);
+      }
+      propGetters.push([key, compileAttr(value)]);
+    }
+    return { propGetters, pseudoClasses, hintSize };
+  }
+  var HOST_STYLE_PROPS = /* @__PURE__ */ new Set([
+    "position",
+    "left",
+    "right",
+    "top",
+    "bottom",
+    "inset",
+    "width",
+    "height",
+    "z-index",
+    "transform"
+  ]);
+  function hostPositionStyle(style) {
+    const all = typeof style === "string" ? cssToObj(style) : style != null && typeof style === "object" ? style : null;
+    if (!all) return void 0;
+    const out = {};
+    for (const [k, v] of Object.entries(all)) {
+      const kebab = k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
+      if (HOST_STYLE_PROPS.has(kebab)) out[k] = v;
+    }
+    return Object.keys(out).length ? out : void 0;
+  }
+  function compileTemplate(html, host) {
+    const tpl = document.createElement("template");
+    //! nosemgrep: direct-inner-html-assignment
+    tpl.innerHTML = encodeCase(html);
+    let tplN = 0;
+    (function stamp(node) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        node.setAttribute("data-dc-tpl", String(tplN++));
+      }
+      for (const c of node.childNodes) stamp(c);
+    })(tpl.content);
+    const builders = walkChildren(tpl.content, host);
+    const render = ((vals, ctx) => builders.map((b, i) => b(vals || {}, ctx, i)));
+    render.__annotated = tpl.innerHTML;
+    return render;
+  }
+  function walkChildren(node, host) {
+    return [...node.childNodes].map((c) => walk(c, host)).filter((b) => b != null);
+  }
+  function walk(node, host) {
+    if (node.nodeType === Node.TEXT_NODE) return walkText(node);
+    if (node.nodeType !== Node.ELEMENT_NODE) return null;
+    const el = node;
+    const tag = el.tagName.toLowerCase();
+    if (tag === "sc-for") return walkFor(el, host);
+    if (tag === "sc-if") return walkIf(el, host);
+    if (tag === "x-import") return walkXImport(el, host);
+    if (tag === "sc-helmet") return host.helmet(el);
+    if (tag === "dc-import") return walkComponent(el, host);
+    return walkElement(el, host);
+  }
+  var warnedHoles = /* @__PURE__ */ new Set();
+  function warnUnresolved(ctx, what) {
+    const key = (ctx?.__name || "?") + "\0" + what;
+    if (warnedHoles.has(key)) return;
+    warnedHoles.add(key);
+    console.warn("[dc-runtime] " + (ctx?.__name || "template") + ": " + what);
+  }
+  function walkText(node) {
+    const txt = node.nodeValue ?? "";
+    if (!txt.includes("{{")) {
+      if (!txt.trim() && !txt.includes(" ")) return null;
+      return () => txt;
+    }
+    const parts = txt.split(/\{\{([\s\S]+?)\}\}/g);
+    return (vals, ctx, key) => h(
+      getReact().Fragment,
+      { key },
+      ...parts.map((p, i) => {
+        if (!(i & 1)) return p;
+        const v = resolve(vals, p);
+        if (v === void 0) {
+          if (!ctx?.__streamingNow) {
+            if (document.body?.hasAttribute("data-dc-editor-on")) {
+              return h(
+                "span",
+                { key: i, className: "sc-interp sc-unresolved" },
+                "{{ " + p.trim() + " }}"
+              );
+            }
+            warnUnresolved(
+              ctx,
+              "{{ " + p.trim() + " }} never resolved \u2014 rendered as empty"
+            );
+            return null;
+          }
+          return h(
+            "span",
+            { key: i, className: "sc-interp sc-missing" },
+            p.trim()
+          );
+        }
+        if (getReact().isValidElement(v) || Array.isArray(v)) {
+          return h(getReact().Fragment, { key: i }, v);
+        }
+        if (v === null || typeof v === "boolean") return null;
+        return h("span", { key: i, className: "sc-interp" }, String(v));
+      })
+    );
+  }
+  function walkFor(el, host) {
+    const listGet = compileAttr(el.getAttribute("list") || "");
+    const asName = el.getAttribute("as") || "item";
+    const hintN = parseInt(el.getAttribute("hint-placeholder-count") || "0", 10);
+    const kids = walkChildren(el, host);
+    const listSrc = el.getAttribute("list") || "";
+    return (vals, ctx, key) => {
+      let list = listGet(vals);
+      if (!Array.isArray(list)) {
+        if (!ctx?.__streamingNow) {
+          if (list !== void 0 && list !== null) {
+            warnUnresolved(
+              ctx,
+              'sc-for list="' + listSrc + '" is not an array (' + typeof list + ")"
+            );
+          }
+          list = [];
+        } else {
+          list = hintN > 0 ? Array(hintN).fill(void 0) : [];
+        }
+      }
+      return h(
+        getReact().Fragment,
+        { key },
+        list.map((item, i) => {
+          const sub = { ...vals, [asName]: item, $index: i };
+          return h(
+            getReact().Fragment,
+            { key: i },
+            kids.map((b, j) => b(sub, ctx, j))
+          );
+        })
+      );
+    };
+  }
+  function walkIf(el, host) {
+    const valGet = compileAttr(el.getAttribute("value") || "");
+    const hintRaw = el.getAttribute("hint-placeholder-val");
+    const hintGet = hintRaw != null ? compileAttr(hintRaw) : null;
+    const kids = walkChildren(el, host);
+    return (vals, ctx, key) => {
+      let v = valGet(vals);
+      if (v === void 0 && hintGet && ctx?.__streamingNow) v = hintGet(vals);
+      return v ? h(
+        getReact().Fragment,
+        { key },
+        kids.map((b, j) => b(vals, ctx, j))
+      ) : null;
+    };
+  }
+  function walkComponent(el, host) {
+    const name = el.getAttribute("name") || el.getAttribute("component") || "";
+    el.removeAttribute("name");
+    el.removeAttribute("component");
+    const tplId = el.getAttribute("data-dc-tpl");
+    const styleRaw = el.getAttribute("style");
+    el.removeAttribute("style");
+    const styleGet = styleRaw != null ? compileAttr(styleRaw) : null;
+    const { propGetters, hintSize } = collectProps(el, "dc-import", host);
+    const kids = walkChildren(el, host);
+    return (vals, ctx, key) => {
+      const props = {
+        key,
+        __hintSize: hintSize,
+        __tplId: tplId,
+        __hostStyle: styleGet ? hostPositionStyle(styleGet(vals)) : void 0
+      };
+      for (const [k, g] of propGetters) {
+        const v = g(vals);
+        if (k === "dcProps") {
+          if (v && typeof v === "object") Object.assign(props, v);
+          continue;
+        }
+        props[k] = v;
+      }
+      if (kids.length) props.children = kids.map((b, j) => b(vals, ctx, j));
+      return h(host.component(name), props);
+    };
+  }
+  function walkXImport(el, host) {
+    const globalNameGet = compileAttr(
+      el.getAttribute("component-from-global-scope") || ""
+    );
+    const exportNameGet = compileAttr(
+      el.getAttribute("component") || el.getAttribute("name") || ""
+    );
+    const fromRaw = el.getAttribute("from") || el.getAttribute("src") || el.getAttribute("import") || "";
+    const urls = fromRaw.trim() ? fromRaw.trim().split(/\s+/) : [];
+    const url = urls.length ? urls[urls.length - 1] : "";
+    const kindOf = (u) => /\.(jsx|tsx)(\?|#|$)/i.test(u) ? "jsx" : "js";
+    const tplId = el.getAttribute("data-dc-tpl");
+    const styleRaw = el.getAttribute("style");
+    el.removeAttribute("style");
+    const styleGet = styleRaw != null ? compileAttr(styleRaw) : null;
+    const wrap = tplId != null || styleGet != null;
+    const { propGetters, hintSize } = collectProps(el, "x-import", host);
+    const hasContent = el.children.length > 0 || !!(el.textContent || "").trim();
+    const kids = hasContent ? walkChildren(el, host) : [];
+    const urlBindable = fromRaw.includes("{{");
+    if (urls.length && !urlBindable) {
+      let prev;
+      for (const u of urls) prev = host.loadExternal(kindOf(u), u, prev);
+    }
+    const evalName = (g, vals) => {
+      const v = g(vals);
+      const s = v == null ? "" : String(v);
+      return s.includes("{{") ? "" : s;
+    };
+    return (vals, ctx, key) => {
+      const globalName = evalName(globalNameGet, vals);
+      const name = globalName || evalName(exportNameGet, vals);
+      const C = !name || urlBindable ? null : globalName ? host.resolveExternalGlobal(url, globalName) : host.resolveExternal(url, name);
+      const hostStyle = styleGet ? hostPositionStyle(styleGet(vals)) : void 0;
+      const wrapper = wrap ? {
+        key,
+        className: "sc-host-x",
+        "data-dc-tpl": tplId,
+        style: hostStyle || { display: "contents" }
+      } : null;
+      if (!C) {
+        const error = urlBindable ? "x-import `from` cannot contain {{ \u2026 }} \u2014 module URLs are resolved at parse time; use a literal URL" : host.resolveExternalError(url, name);
+        const ph = host.placeholder({
+          key: wrapper ? void 0 : key,
+          name,
+          hintSize,
+          error
+        });
+        return wrapper ? h("div", wrapper, ph) : ph;
+      }
+      const props = wrapper ? {} : { key };
+      let unresolvedHole = false;
+      for (const [k, g] of propGetters) {
+        if (k === "component" || k === "componentFromGlobalScope" || k === "from") {
+          continue;
+        }
+        const v = g(vals);
+        if (v === void 0) unresolvedHole = true;
+        if (k === "dcProps") {
+          if (v && typeof v === "object") Object.assign(props, v);
+          continue;
+        }
+        props[k] = v;
+      }
+      if (unresolvedHole && ctx?.__htmlStreamingNow) {
+        const ph = host.placeholder({
+          key: wrapper ? void 0 : key,
+          name,
+          hintSize,
+          error: null
+        });
+        return wrapper ? h("div", wrapper, ph) : ph;
+      }
+      if (kids.length) props.children = kids.map((b, j) => b(vals, ctx, j));
+      return wrapper ? h("div", wrapper, h(C, props)) : h(C, props);
+    };
+  }
+  function contentKey(el) {
+    const clone = el.cloneNode(true);
+    for (const d of clone.querySelectorAll("*")) {
+      while (d.attributes.length) d.removeAttribute(d.attributes[0].name);
+    }
+    const s = clone.innerHTML;
+    let h2 = 5381;
+    for (let i = 0; i < s.length; i++) h2 = (h2 << 5) + h2 + s.charCodeAt(i) | 0;
+    return s.length + "." + (h2 >>> 0).toString(36);
+  }
+  var NEVER_CONTENT_KEYED = new Set(
+    "script style textarea option title select canvas iframe video audio".split(
+      " "
+    )
+  );
+  var NOT_INLINE_SELECTOR = ":not(" + [...INLINE_TEXT_TAGS].join(",") + ")";
+  function walkElement(el, host) {
+    const realTag = RAW_UNWRAP[el.localName] || el.localName;
+    const tplId = el.getAttribute("data-dc-tpl");
+    const inlineOnly = el.childNodes.length > 0 && !NEVER_CONTENT_KEYED.has(realTag) && el.querySelector(NOT_INLINE_SELECTOR) === null;
+    const keySuffix = inlineOnly ? "|" + contentKey(el) : "";
+    const { propGetters, pseudoClasses } = collectProps(el, "dom", host);
+    const kids = walkChildren(el, host);
+    return (vals, ctx, key) => {
+      const props = {
+        key: key + keySuffix,
+        "data-dc-tpl": tplId
+      };
+      for (const [k, g] of propGetters) {
+        let v = g(vals);
+        if (k === "style" && typeof v === "string") v = cssToObj(v);
+        if ((k === "value" || k === "checked") && v === void 0) {
+          v = k === "checked" ? false : "";
+        }
+        props[k] = v;
+      }
+      if (pseudoClasses.length) {
+        props.className = [props.className, ...pseudoClasses].filter(Boolean).join(" ");
+      }
+      return h(realTag, props, ...kids.map((b, j) => b(vals, ctx, j)));
+    };
+  }
+
+  // src/logic.ts
+  var StreamableLogic = class {
+    constructor(props) {
+      __publicField(this, "props");
+      __publicField(this, "state", {});
+      /** Back-pointer to the wrapper component, installed after construction. */
+      __publicField(this, "__host");
+      this.props = props || {};
+    }
+    setState(update, cb) {
+      this.__host && this.__host.__setLogicState(update, cb);
+    }
+    forceUpdate() {
+      this.__host && this.__host.forceUpdate();
+    }
+    componentDidMount() {
+    }
+    componentDidUpdate(_prevProps) {
+    }
+    componentWillUnmount() {
+    }
+    /** The flat object the template renders against (merged over props). */
+    renderVals() {
+      return {};
+    }
+  };
+  function evalDcLogic(src) {
+    //! nosemgrep: eval-and-function-constructor
+    const fn = new Function(
+      "DCLogic",
+      "StreamableLogic",
+      "React",
+      src + '\n;return (typeof Component!=="undefined"&&Component)||undefined;'
+    );
+    return fn(StreamableLogic, StreamableLogic, getReact());
+  }
+
+  // src/component.ts
+  function shallowEqual(a, b) {
+    if (!b) return false;
+    const ak = Object.keys(a).filter((k) => k !== "children");
+    const bk = Object.keys(b).filter((k) => k !== "children");
+    if (ak.length !== bk.length) return false;
+    for (const k of ak) if (a[k] !== b[k]) return false;
+    return true;
+  }
+  function Placeholder({
+    name,
+    hintSize,
+    streaming,
+    error
+  }) {
+    const [w, hgt] = (hintSize || "100%,60px").split(",");
+    return h(
+      "div",
+      {
+        className: "sc-placeholder" + (streaming ? " sc-streaming" : ""),
+        style: { width: w.trim(), height: hgt && hgt.trim() },
+        title: name
+      },
+      error ? h(
+        "div",
+        { className: "sc-placeholder-error" },
+        (name ? name + ": " : "") + error
+      ) : null
+    );
+  }
+  function hintToMin(hint) {
+    if (!hint) return void 0;
+    const [w, hgt] = hint.split(",");
+    return { minWidth: w.trim(), minHeight: hgt && hgt.trim() };
+  }
+  function createComponentFactory(registry, ensureFetched) {
+    const React = getReact();
+    const AncestorContext = React.createContext([]);
+    class StreamableComponent extends React.Component {
+      constructor(props) {
+        super(props);
+        __publicField(this, "__name");
+        __publicField(this, "__sub");
+        __publicField(this, "__needsDidMount", false);
+        /** Snapshot of the registry's streaming flags taken at render time —
+         *  builders read it off the RenderCtx (this) to pick placeholder vs
+         *  render-nothing for unresolved values. */
+        __publicField(this, "__streamingNow", false);
+        __publicField(this, "__htmlStreamingNow", false);
+        /** When a construct throws, remember the (class, registry.ver, props)
+         *  triple so render-time reconcile doesn't re-attempt it on every parent
+         *  re-render. A registry bump (new class, template, external module
+         *  resolving via bumpAll) changes `ver` and breaks the memo so an
+         *  env-dependent constructor can self-heal. */
+        __publicField(this, "__failedLogic", null);
+        __publicField(this, "__failedUserProps", null);
+        __publicField(this, "__failedVer", -1);
+        /** Per-instance constructor error — kept here (not on the registry entry)
+         *  so one instance's successful construct can't hide a sibling's failure,
+         *  and a construct can never wipe an eval error `updateJs` recorded on
+         *  `r.logicError`. */
+        __publicField(this, "__ctorError", null);
+        __publicField(this, "logic");
+        this.__name = props.__name;
+        this.state = { __v: 0, __err: null };
+        this.__sub = () => {
+          if (this.state.__err) this.setState({ __err: null });
+          this.forceUpdate();
+        };
+        this.__makeLogic(registry.get(this.__name).Logic, null);
+        ensureFetched(this.__name);
+      }
+      /** Error-boundary hook: a render crash anywhere in this DC's subtree
+       *  (its own template, an x-import'd component, a child DC without its
+       *  own deeper boundary) lands here instead of unmounting the page. */
+      static getDerivedStateFromError(e) {
+        return { __err: e instanceof Error && e.message ? e.message : String(e) };
+      }
+      componentDidCatch(e, info) {
+        console.error(
+          "[dc-runtime] render error in <" + this.__name + ">:",
+          e,
+          info?.componentStack || ""
+        );
+      }
+      /** Instantiate the logic class (or the no-op base) and adopt `prevState`
+       *  over its initial state — used both at mount and on hot-swap. */
+      __makeLogic(Logic, prevState) {
+        const L = Logic || StreamableLogic;
+        try {
+          this.logic = new L(this.__userProps());
+          this.__failedLogic = null;
+          this.__failedUserProps = null;
+          this.__ctorError = null;
+        } catch (e) {
+          console.error(e);
+          this.__failedLogic = Logic;
+          this.__failedUserProps = this.__userProps();
+          this.__failedVer = registry.get(this.__name).ver;
+          this.__ctorError = this.__name + ": " + (e instanceof Error && e.message ? e.message : String(e));
+          this.logic = new StreamableLogic(
+            this.__userProps()
+          );
+        }
+        this.logic.__host = this;
+        if (prevState)
+          this.logic.state = { ...this.logic.state || {}, ...prevState };
+      }
+      /** The props the author's logic + template see — internal __-prefixed
+       *  wiring stripped. */
+      __userProps() {
+        const { __name, __hintSize, __tplId, __hostStyle, ...rest } = this.props;
+        return rest;
+      }
+      __setLogicState(update, cb) {
+        const prev = this.logic.state;
+        const patch = typeof update === "function" ? update(prev) : update;
+        this.logic.state = { ...prev, ...patch };
+        this.setState((s) => ({ __v: s.__v + 1 }), cb);
+      }
+      /** Swap the logic instance when the registry's Logic class changed
+       *  (streaming completion, hot reload). State carries over; didMount
+       *  re-fires after the swap commits so refs exist. */
+      __reconcileLogic() {
+        const r = registry.get(this.__name);
+        const Next = r.Logic;
+        const Cur = this.logic.constructor;
+        if (Next === Cur || !Next && Cur === StreamableLogic || Next === this.__failedLogic && r.ver === this.__failedVer && shallowEqual(this.__userProps(), this.__failedUserProps)) {
+          return;
+        }
+        if (!this.__needsDidMount) {
+          try {
+            this.logic.componentWillUnmount();
+          } catch (e) {
+            console.error(e);
+          }
+        }
+        this.__makeLogic(Next, this.logic.state);
+        this.__needsDidMount = true;
+      }
+      componentDidMount() {
+        registry.get(this.__name).subs.add(this.__sub);
+        try {
+          this.logic.componentDidMount();
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      componentDidUpdate(prevProps) {
+        this.logic.props = this.__userProps();
+        if (this.__needsDidMount) {
+          if (this.state.__err || !registry.get(this.__name).tpl) return;
+          this.__needsDidMount = false;
+          try {
+            this.logic.componentDidMount();
+          } catch (e) {
+            console.error(e);
+          }
+        } else {
+          try {
+            this.logic.componentDidUpdate(prevProps);
+          } catch (e) {
+            console.error(e);
+          }
+        }
+      }
+      componentWillUnmount() {
+        registry.get(this.__name).subs.delete(this.__sub);
+        if (!this.__needsDidMount) {
+          try {
+            this.logic.componentWillUnmount();
+          } catch (e) {
+            console.error(e);
+          }
+        }
+      }
+      render() {
+        const r = registry.get(this.__name);
+        const cls = "sc-host" + (r.htmlStreaming ? " sc-streaming-html" : "") + (r.jsStreaming ? " sc-streaming-js" : "");
+        const hintStyle = r.htmlStreaming ? hintToMin(this.props.__hintSize) : void 0;
+        const hostStyle = this.props.__hostStyle || hintStyle ? { ...hintStyle || {}, ...this.props.__hostStyle || {} } : void 0;
+        const hostBase = {
+          className: cls,
+          style: hostStyle,
+          "data-sc-name": this.__name,
+          "data-dc-tpl": this.props.__tplId
+        };
+        const chain = Array.isArray(this.context) ? this.context : [];
+        if (chain.includes(this.__name)) {
+          const cycle = [
+            ...chain.slice(chain.indexOf(this.__name)),
+            this.__name
+          ].join(" \u2192 ");
+          return h(
+            "div",
+            { ...hostBase, className: cls + " sc-has-error" },
+            h(Placeholder, {
+              name: this.__name,
+              hintSize: this.props.__hintSize,
+              error: "circular import: " + cycle
+            })
+          );
+        }
+        if (this.state.__err) {
+          return h(
+            "div",
+            { ...hostBase, className: cls + " sc-has-error" },
+            h(
+              "div",
+              { className: "sc-logic-error", "data-omelette-chrome": "" },
+              this.__name + ": " + this.state.__err
+            ),
+            h(Placeholder, {
+              name: this.__name,
+              hintSize: this.props.__hintSize,
+              error: this.state.__err
+            })
+          );
+        }
+        this.__reconcileLogic();
+        if (!r.tpl) {
+          return h(
+            "div",
+            hostBase,
+            h(Placeholder, { name: this.__name, hintSize: this.props.__hintSize })
+          );
+        }
+        const userProps = this.__userProps();
+        this.logic.props = userProps;
+        let vals = userProps;
+        let renderErr = r.logicError || this.__ctorError;
+        try {
+          vals = { ...userProps, ...this.logic.renderVals() || {} };
+        } catch (e) {
+          console.error(e);
+          renderErr = this.__name + ".renderVals(): " + (e instanceof Error && e.message ? e.message : String(e));
+        }
+        this.__streamingNow = !!(r.htmlStreaming || r.jsStreaming);
+        this.__htmlStreamingNow = !!r.htmlStreaming;
+        return h(
+          "div",
+          { ...hostBase, className: cls + (renderErr ? " sc-has-error" : "") },
+          renderErr && h(
+            "div",
+            { className: "sc-logic-error", "data-omelette-chrome": "" },
+            renderErr
+          ),
+          h(
+            AncestorContext.Provider,
+            { value: [...chain, this.__name] },
+            r.tpl(vals, this)
+          )
+        );
+      }
+    }
+    __publicField(StreamableComponent, "contextType", AncestorContext);
+    const named = /* @__PURE__ */ new Map();
+    function getDC(name) {
+      const hit = named.get(name);
+      if (hit) return hit;
+      function Dispatcher(p) {
+        const [, setTick] = React.useState(0);
+        React.useEffect(() => {
+          const sub = () => setTick((n) => n + 1);
+          registry.get(name).subs.add(sub);
+          return () => {
+            registry.get(name).subs.delete(sub);
+          };
+        }, []);
+        ensureFetched(name);
+        return h(StreamableComponent, { ...p, __name: name });
+      }
+      Dispatcher.displayName = name;
+      named.set(name, Dispatcher);
+      return Dispatcher;
+    }
+    return {
+      getDC,
+      StreamableComponent
+    };
+  }
+
+  // src/external.ts
+  var isCustomElementName = (n) => !n.includes(".") && n.includes("-");
+  function isRenderableType(g) {
+    if (typeof g === "function") return !isElementClass(g);
+    return typeof g === "object" && g !== null && typeof g.$$typeof === "symbol";
+  }
+  function resolveDottedPath(root, name) {
+    let cur = root;
+    for (const seg of name.split(".")) {
+      if (cur == null) return void 0;
+      cur = cur[seg];
+    }
+    return cur;
+  }
+  var BABEL_URL = "https://unpkg.com/@babel/standalone@7.29.0/babel.min.js";
+  var BABEL_SRI = "sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y";
+  var GLOBAL_POLL_INTERVAL_MS = 50;
+  var GLOBAL_POLL_TIMEOUT_MS = 3e4;
+  function createExternalModules(onResolved) {
+    const cache = /* @__PURE__ */ new Map();
+    let babelLoading = null;
+    const reportedMissing = /* @__PURE__ */ new Map();
+    const polling = /* @__PURE__ */ new Set();
+    function ensureBabel() {
+      if (window.Babel) return Promise.resolve();
+      if (babelLoading) return babelLoading;
+      babelLoading = new Promise((res, rej) => {
+        const s = document.createElement("script");
+        s.src = BABEL_URL;
+        s.integrity = BABEL_SRI;
+        s.crossOrigin = "anonymous";
+        s.onload = () => res();
+        s.onerror = rej;
+        document.head.appendChild(s);
+      });
+      return babelLoading;
+    }
+    const pending = /* @__PURE__ */ new Map();
+    function load(kind, url, after) {
+      const existing = pending.get(url);
+      if (existing) return existing;
+      cache.set(url, null);
+      console.info("[dc-runtime] x-import: loading", url, "(" + kind + ")");
+      const ready = Promise.all([
+        kind === "jsx" ? ensureBabel() : Promise.resolve(),
+        after ?? Promise.resolve()
+      ]);
+      const p = ready.then(() => fetch(url)).then((r) => {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.text();
+      }).then((src) => {
+        const code = kind === "jsx" ? window.Babel.transform(src, {
+          filename: url,
+          presets: ["react", "typescript"]
+        }).code : src;
+        const module = { exports: {} };
+        const before = new Set(Object.keys(window));
+        //! nosemgrep: eval-and-function-constructor
+        new Function("React", "module", "exports", "require", code)(
+          getReact(),
+          module,
+          module.exports,
+          () => ({})
+        );
+        const globals = {};
+        for (const k of Object.keys(window)) {
+          if (!before.has(k) && typeof window[k] === "function") {
+            globals[k] = window[k];
+          }
+        }
+        cache.set(url, { mod: module.exports, globals });
+        console.info(
+          "[dc-runtime] x-import: loaded",
+          url,
+          "\u2014 exports:",
+          Object.keys(module.exports),
+          "window globals:",
+          Object.keys(globals)
+        );
+        onResolved();
+      }).catch((e) => {
+        cache.set(url, {
+          mod: {},
+          globals: {},
+          error: "failed to load: " + (e instanceof Error && e.message ? e.message : String(e))
+        });
+        console.error(
+          "[dc-runtime] x-import: FAILED to load",
+          url,
+          "(" + kind + ")",
+          e
+        );
+        onResolved();
+      });
+      pending.set(url, p);
+      return p;
+    }
+    function resolve2(url, name) {
+      const entry = cache.get(url);
+      if (!entry) return null;
+      const { mod, globals } = entry;
+      const C = mod && mod[name] || globals && globals[name] || typeof window !== "undefined" && window[name] || mod && mod.default;
+      if (typeof C === "function") return C;
+      const key = url + "\0" + name;
+      if (!reportedMissing.has(key)) {
+        reportedMissing.set(
+          key,
+          entry.error || 'no export named "' + name + '" (has: ' + Object.keys(mod).join(", ") + ")"
+        );
+        console.error(
+          "[dc-runtime] x-import: module",
+          url,
+          "loaded but has no component named",
+          JSON.stringify(name),
+          "\u2014 available exports:",
+          Object.keys(mod),
+          "window globals:",
+          Object.keys(globals),
+          ". The module must `module.exports = {" + name + "}` or set `window." + name + "`."
+        );
+      }
+      return null;
+    }
+    function waitForGlobal(name) {
+      if (polling.has(name)) return;
+      polling.add(name);
+      const started = Date.now();
+      const isCE = isCustomElementName(name);
+      const tick = () => {
+        const found = isCE ? customElements.get(name) : isRenderableType(resolveDottedPath(window, name));
+        if (found) {
+          polling.delete(name);
+          onResolved();
+          return;
+        }
+        if (Date.now() - started >= GLOBAL_POLL_TIMEOUT_MS) {
+          console.warn(
+            "[dc-runtime] x-import: global",
+            JSON.stringify(name),
+            "never appeared on window after " + GLOBAL_POLL_TIMEOUT_MS + "ms"
+          );
+          return;
+        }
+        setTimeout(tick, GLOBAL_POLL_INTERVAL_MS);
+      };
+      setTimeout(tick, GLOBAL_POLL_INTERVAL_MS);
+    }
+    function resolveGlobal(url, name) {
+      const isCE = isCustomElementName(name);
+      if (!url) {
+        if (isCE) {
+          if (customElements.get(name)) return name;
+          waitForGlobal(name);
+          return null;
+        }
+        const g2 = resolveDottedPath(window, name);
+        if (isRenderableType(g2)) return g2;
+        waitForGlobal(name);
+        return null;
+      }
+      const entry = cache.get(url);
+      if (!entry) return null;
+      if (isCE && customElements.get(name)) return name;
+      const g = entry.globals[name] ?? resolveDottedPath(window, name);
+      if (isRenderableType(g)) return g;
+      if (name.includes(".")) return null;
+      const key = url + "\0global\0" + name;
+      if (!reportedMissing.has(key)) {
+        reportedMissing.set(key, null);
+        if (isCE && !customElements.get(name)) {
+          console.warn(
+            "[dc-runtime] x-import:",
+            url,
+            "loaded but no custom element",
+            JSON.stringify(name),
+            "is registered and window." + name + " is not a function \u2014 rendering <" + name + "> as an unknown element."
+          );
+        }
+      }
+      return name;
+    }
+    function getError(url, name) {
+      const entry = cache.get(url);
+      if (entry?.error) return entry.error;
+      return reportedMissing.get(url + "\0" + name) || null;
+    }
+    return { load, resolve: resolve2, resolveGlobal, getError };
+  }
+  function isElementClass(g) {
+    try {
+      return typeof g === "function" && typeof HTMLElement !== "undefined" && g.prototype instanceof HTMLElement;
+    } catch {
+      return false;
+    }
+  }
+
+  // src/atomics.ts
+  var ATOMIC_CSS = (
+    // layout
+    ".fx{display:flex}.col{display:flex;flex-direction:column}.grid{display:grid}.ac{align-items:center}.jc{justify-content:center}.jb{justify-content:space-between}.f1{flex:1}.noshrink{flex-shrink:0}.wrap{flex-wrap:wrap}.fw5{font-weight:500}.fw6{font-weight:600}.fw7{font-weight:700}.fw8{font-weight:800}.fs11{font-size:11px}.fs12{font-size:12px}.fs13{font-size:13px}.fs14{font-size:14px}.fs15{font-size:15px}.fs16{font-size:16px}.fs20{font-size:20px}.fs22{font-size:22px}.upper{text-transform:uppercase}.tc{text-align:center}.nowrap{white-space:nowrap}.gap8{gap:8px}.gap10{gap:10px}.gap12{gap:12px}.gap16{gap:16px}.gap24{gap:24px}.m0{margin:0}.mt8{margin-top:8px}.mt12{margin-top:12px}.mt16{margin-top:16px}.mb8{margin-bottom:8px}.mb12{margin-bottom:12px}.mb16{margin-bottom:16px}.posrel{position:relative}.posabs{position:absolute}.round{border-radius:50%}.ohide{overflow:hidden}.bbox{box-sizing:border-box}.pointer{cursor:pointer}.w100{width:100%}.b0{border:none}"
+  );
+
+  // src/helmet.ts
+  var DESIGN_DOC_MODE_RE = /<meta\b[^>]*\bname\s*=\s*["']design_doc_mode["'][^>]*\b(?:content|value)\s*=\s*["'](\w+)["']/i;
+  var CANVAS_BG_LIGHT = "#f0eee6";
+  var CANVAS_BG_DARK = "#2e2c26";
+  function createHelmetManager(doc, isStreaming) {
+    const mounted = /* @__PURE__ */ new Set();
+    const live = /* @__PURE__ */ new Map();
+    let designDocMode = null;
+    let canvasStyleEl = null;
+    let appTheme = "light";
+    try {
+      const ds = doc.documentElement.dataset.theme;
+      appTheme = ds === "dark" || ds === "light" ? ds : new URLSearchParams(doc.defaultView?.location.search ?? "").get(
+        "theme"
+      ) === "dark" ? "dark" : "light";
+    } catch {
+    }
+    function applyCanvasBg() {
+      if (!canvasStyleEl) return;
+      const bg = appTheme === "dark" ? CANVAS_BG_DARK : CANVAS_BG_LIGHT;
+      canvasStyleEl.textContent = `html,body{background:${bg}}#dc-root>.sc-host{position:relative}`;
+    }
+    function postDesignMode(mode) {
+      if (window.parent === window) return;
+      try {
+        window.parent.postMessage({ type: "__dc_design_mode", mode }, "*");
+      } catch {
+      }
+    }
+    function setDesignDocMode(mode) {
+      if (mode === designDocMode) return;
+      designDocMode = mode;
+      postDesignMode(mode);
+      if (mode === "canvas") {
+        doc.documentElement.setAttribute("data-dc-canvas", "");
+        canvasStyleEl = doc.createElement("style");
+        canvasStyleEl.setAttribute("data-dc-canvas", "");
+        applyCanvasBg();
+        doc.head.appendChild(canvasStyleEl);
+      } else {
+        doc.documentElement.removeAttribute("data-dc-canvas");
+        canvasStyleEl?.remove();
+        canvasStyleEl = null;
+      }
+    }
+    window.addEventListener("message", (e) => {
+      const type = e.data && e.data.type;
+      if (type === "__dc_theme") {
+        const t = e.data.theme;
+        if (t === "light" || t === "dark") {
+          appTheme = t;
+          doc.documentElement.dataset.theme = t;
+          applyCanvasBg();
+        }
+        return;
+      }
+      if (!designDocMode || type !== "__dc_probe") return;
+      postDesignMode(designDocMode);
+    });
+    function compile(node) {
+      const raw = [...node.children];
+      const helmetClosed = node.nextSibling != null || node.parentNode?.nextSibling != null;
+      if (node.hasAttribute("data-dc-atomics") && !mounted.has("__dc-atomics")) {
+        mounted.add("__dc-atomics");
+        const el = doc.createElement("style");
+        el.id = "__dc-atomics";
+        el.textContent = ATOMIC_CSS;
+        doc.head.appendChild(el);
+      }
+      return (_vals, ctx) => {
+        const name = ctx && ctx.__name || "";
+        const streaming = !!(name && isStreaming(name));
+        for (let i = 0; i < raw.length; i++) {
+          const child = raw[i];
+          const tag = child.tagName;
+          const mayBePartial = streaming && !helmetClosed && i === raw.length - 1;
+          if (tag === "SCRIPT") {
+            if (mayBePartial) continue;
+            const key = "SCRIPT|" + (child.getAttribute("src") || child.textContent || "");
+            if (mounted.has(key)) continue;
+            mounted.add(key);
+            const el = doc.createElement("script");
+            for (const { name: an, value } of [...child.attributes])
+              el.setAttribute(an, value);
+            if (child.textContent) el.textContent = child.textContent;
+            doc.head.appendChild(el);
+          } else if (tag === "LINK" || tag === "META") {
+            if (mayBePartial) continue;
+            const key = tag + "|" + (child.getAttribute("href") || child.getAttribute("src") || child.outerHTML);
+            if (mounted.has(key)) continue;
+            mounted.add(key);
+            doc.head.appendChild(child.cloneNode(true));
+          } else {
+            const key = name + "|" + i;
+            let el = live.get(key);
+            if (!el || el.tagName !== tag) {
+              if (el) el.remove();
+              el = doc.createElement(tag.toLowerCase());
+              live.set(key, el);
+              doc.head.appendChild(el);
+            }
+            for (const { name: an, value } of [...child.attributes]) {
+              if (el.getAttribute(an) !== value) el.setAttribute(an, value);
+            }
+            if (el.textContent !== child.textContent)
+              el.textContent = child.textContent;
+          }
+        }
+        return null;
+      };
+    }
+    return { compile, setDesignDocMode };
+  }
+
+  // src/pseudo.ts
+  function createPseudoSheet(doc) {
+    let el = null;
+    const cache = /* @__PURE__ */ new Map();
+    let n = 0;
+    return (pseudo, css) => {
+      const k = pseudo + "|" + css;
+      const hit = cache.get(k);
+      if (hit) return hit;
+      if (!el) {
+        el = doc.createElement("style");
+        doc.head.appendChild(el);
+      }
+      const cls = "scp" + (n++).toString(36);
+      const sel = pseudo === "before" || pseudo === "after" ? "." + cls + "::" + pseudo : "." + cls + ":" + pseudo;
+      el.sheet.insertRule(sel + "{" + css + "}", el.sheet.cssRules.length);
+      cache.set(k, cls);
+      return cls;
+    };
+  }
+
+  // src/registry.ts
+  function createRegistry() {
+    const entries = /* @__PURE__ */ Object.create(null);
+    function get(name) {
+      return entries[name] || (entries[name] = {
+        html: "",
+        tpl: null,
+        Logic: null,
+        jsStreaming: false,
+        htmlStreaming: false,
+        ver: 0,
+        subs: /* @__PURE__ */ new Set(),
+        fetched: false
+      });
+    }
+    function bump(name) {
+      const r = get(name);
+      r.ver++;
+      for (const fn of r.subs) fn();
+    }
+    return {
+      entries,
+      get,
+      bump,
+      bumpAll() {
+        for (const n in entries) bump(n);
+      }
+    };
+  }
+
+  // src/runtime.ts
+  var COMPONENT_DIR = ".";
+  function createRuntime(doc = document) {
+    const registry = createRegistry();
+    const pseudoClass = createPseudoSheet(doc);
+    const helmet = createHelmetManager(
+      doc,
+      (name) => registry.get(name).htmlStreaming
+    );
+    const external = createExternalModules(() => registry.bumpAll());
+    const factory = createComponentFactory(registry, ensureFetched);
+    const host = {
+      component: (name) => factory.getDC(name),
+      placeholder: (props) => h(Placeholder, props),
+      helmet: (node) => helmet.compile(node),
+      loadExternal: (kind, url, after) => external.load(kind, url, after),
+      resolveExternal: (url, name) => external.resolve(url, name),
+      resolveExternalGlobal: (url, name) => external.resolveGlobal(url, name),
+      resolveExternalError: (url, name) => external.getError(url, name),
+      pseudoClass
+    };
+    function ensureFetched(name) {
+      const r = registry.get(name);
+      if (r.fetched) return;
+      r.fetched = true;
+      const url = COMPONENT_DIR + "/" + encodeURIComponent(name) + ".dc.html";
+      fetch(url).then((res) => {
+        if (!res.ok) {
+          console.error(
+            "[dc-runtime] sibling fetch for <" + name + "/> failed:",
+            url,
+            "returned",
+            res.status,
+            "\u2014 the reference renders as an empty placeholder."
+          );
+          return "";
+        }
+        return res.text();
+      }).then((t) => {
+        if (!t) return;
+        const parsed = parseDcText(t);
+        if (!parsed) {
+          console.error(
+            "[dc-runtime] sibling fetch for <" + name + "/>:",
+            url,
+            "has no <x-dc> block \u2014 not a Design Component."
+          );
+          return;
+        }
+        if (parsed.props) r.propsMeta = parsed.props;
+        if (parsed.preview) r.preview = parsed.preview;
+        if (parsed.template && !r.html) updateHtml(name, parsed.template);
+        if (parsed.js && !r.Logic) updateJs(name, parsed.js);
+      }).catch(
+        (e) => console.error(
+          "[dc-runtime] sibling fetch for <" + name + "/> threw:",
+          url,
+          e
+        )
+      );
+    }
+    let rootName = null;
+    function updateHtml(name, html) {
+      const r = registry.get(name);
+      r.html = html;
+      if (name === rootName) {
+        const mode = DESIGN_DOC_MODE_RE.exec(html)?.[1] ?? null;
+        if (mode || !r.htmlStreaming) helmet.setDesignDocMode(mode);
+      }
+      try {
+        r.tpl = compileTemplate(html, host);
+      } catch (e) {
+        console.error("[dc-runtime] template compile FAILED for", name, e);
+      }
+      registry.bump(name);
+    }
+    function updateJs(name, src) {
+      const r = registry.get(name);
+      const seq = r.jsSeq = (r.jsSeq || 0) + 1;
+      try {
+        const Cls = evalDcLogic(src);
+        if (r.jsSeq !== seq) return;
+        if (typeof Cls !== "function") {
+          r.logicError = name + ".dc.html: <script data-dc-script> must define `class Component extends DCLogic`";
+        } else {
+          r.logicError = null;
+          r.Logic = Cls;
+        }
+      } catch (e) {
+        if (r.jsSeq !== seq) return;
+        console.error(
+          "[dc-runtime] logic class eval FAILED for",
+          name,
+          "\u2014 the template renders with props only.",
+          e
+        );
+        r.logicError = name + ": " + (e instanceof Error && e.message ? e.message : String(e));
+      }
+      registry.bump(name);
+    }
+    function setStreaming(name, kind, on) {
+      const r = registry.get(name);
+      if (kind === "html") r.htmlStreaming = !!on;
+      else r.jsStreaming = !!on;
+      let any = false;
+      for (const n in registry.entries) {
+        const e = registry.entries[n];
+        if (e && (e.htmlStreaming || e.jsStreaming)) {
+          any = true;
+          break;
+        }
+      }
+      doc.documentElement.classList.toggle("sc-dc-streaming", any);
+      registry.bump(name);
+    }
+    function dcUpdate(name, kind, content, streaming) {
+      if (streaming) registry.get(name).fetched = true;
+      if (kind === "html") {
+        setStreaming(name, "html", !!streaming);
+        updateHtml(name, content);
+      } else if (kind === "js") {
+        setStreaming(name, "js", !!streaming);
+        if (!streaming) updateJs(name, content);
+      } else if (kind === "props") {
+        const { props, preview } = parseDataProps(content);
+        const r = registry.get(name);
+        r.propsMeta = props ?? void 0;
+        r.preview = preview;
+        registry.bump(name);
+      }
+    }
+    function setProps(name, overrides) {
+      registry.get(name).propOverrides = overrides && typeof overrides === "object" ? { ...overrides } : null;
+      registry.bump(name);
+    }
+    function adoptParsed(name, parsed) {
+      if (!parsed) return;
+      const r = registry.get(name);
+      if (parsed.props) r.propsMeta = parsed.props;
+      if (parsed.preview) r.preview = parsed.preview;
+      if (parsed.template) updateHtml(name, parsed.template);
+      if (parsed.js) updateJs(name, parsed.js);
+    }
+    return {
+      registry,
+      getDC: factory.getDC,
+      updateHtml,
+      updateJs,
+      dcUpdate,
+      setProps,
+      adoptParsed,
+      setRootName: (name) => {
+        rootName = name;
+      },
+      markFetched: (name) => {
+        registry.get(name).fetched = true;
+      },
+      annotatedTemplate: (name) => {
+        const r = registry.get(name);
+        return r.tpl && r.tpl.__annotated || null;
+      },
+      templateSource: (name) => registry.get(name).html || null,
+      StreamableLogic
+    };
+  }
+
+  // src/index.ts
+  var REACT_URL = "https://unpkg.com/react@18.3.1/umd/react.production.min.js";
+  var REACT_SRI = "sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z";
+  var REACT_DOM_URL = "https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js";
+  var REACT_DOM_SRI = "sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1";
+  function hideRawTemplate() {
+    const s = document.createElement("style");
+    s.textContent = "x-dc{display:none!important}";
+    document.head.appendChild(s);
+  }
+  function loadScript(src, integrity) {
+    return new Promise((resolve2, reject) => {
+      //! nosemgrep: create-script-element
+      const s = document.createElement("script");
+      s.src = src;
+      s.integrity = integrity;
+      s.crossOrigin = "anonymous";
+      s.async = false;
+      s.onload = () => resolve2();
+      s.onerror = () => reject(new Error(`failed to load ${src}`));
+      document.head.appendChild(s);
+    });
+  }
+  function loadReactUmd() {
+    const w = window;
+    if (w.React && w.ReactDOM) return Promise.resolve();
+    return Promise.all([
+      loadScript(REACT_URL, REACT_SRI),
+      loadScript(REACT_DOM_URL, REACT_DOM_SRI)
+    ]).then(() => void 0);
+  }
+  function init() {
+    const runtime = createRuntime(document);
+    let rootName = "Root";
+    const baseCss = document.createElement("style");
+    baseCss.textContent = BASE_CSS;
+    document.head.prepend(baseCss);
+    const notifyHost = () => {
+      if (window.parent === window) return;
+      const r = runtime.registry.entries[rootName];
+      try {
+        window.parent.postMessage(
+          {
+            type: "__dc_booted",
+            rootName,
+            propsMeta: r && r.propsMeta || null,
+            preview: r && r.preview || null
+          },
+          "*"
+        );
+      } catch {
+      }
+    };
+    const api = {
+      __dcUpdate: (name, kind, content, streaming) => {
+        runtime.dcUpdate(name, kind, content, streaming);
+        if (name === rootName && !streaming && kind === "props") notifyHost();
+      },
+      __dcSetProps: (name, overrides) => runtime.setProps(name, overrides),
+      /** Name of the component currently mounted as the page root — DC tools
+       *  push their template-stream here when targeting "the open page". */
+      __dcRootName: () => rootName,
+      /** Editor bridge — the encoded, `data-dc-tpl`-annotated template source.
+       *  The host editor parses this into its own template DOM so it can map a
+       *  rendered node (carrying the same `data-dc-tpl`) back to the source
+       *  node that emitted it. Returns the encoded form (`<sc-comp>`,
+       *  `sc-camel-*` attrs); the editor decodes on serialize. */
+      __dcAnnotatedTemplate: (name) => runtime.annotatedTemplate(name),
+      /** Editor bridge — the *original* (decoded) template source. */
+      __dcTemplateSource: (name) => runtime.templateSource(name),
+      __dcBoot: () => {
+        rootName = boot(runtime, document) ?? rootName;
+        notifyHost();
+      },
+      __dcRegistry: runtime.registry.entries,
+      getDC: (name) => runtime.getDC(name),
+      // `DCLogic` is the documented base class name; `StreamableLogic` is the
+      // implementation alias kept for any project that already references it.
+      DCLogic: runtime.StreamableLogic,
+      StreamableLogic: runtime.StreamableLogic
+    };
+    Object.assign(window, api);
+    window.__dcContentKeyed = true;
+    if (document.readyState !== "loading") api.__dcBoot();
+    else document.addEventListener("DOMContentLoaded", () => api.__dcBoot());
+  }
+  hideRawTemplate();
+  loadReactUmd().then(init).catch((err) => {
+    console.error("[dc] failed to load React or boot:", err);
+    throw err;
+  });
+})();
+
+</script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<template id="__bundler_thumbnail"><svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg"><rect width="400" height="400" fill="#16293f"/><rect x="120" y="150" width="160" height="100" rx="10" fill="#b08d4f"/><text x="200" y="212" font-family="Georgia,serif" font-size="26" font-weight="700" fill="#16293f" text-anchor="middle">ACCT 221</text></svg></template>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&amp;family=Schibsted+Grotesk:wght@500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{margin:0;background:#f5f4ef;color:#3a4550;font-family:'Public Sans',system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+  ::selection{background:rgba(176,141,79,0.25);}
+  ul{margin:0;padding:0;}
+  input:focus{outline:2px solid var(--accent);outline-offset:1px;}
+  input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+  input[type=number]{-moz-appearance:textfield;}
+</style>
+</helmet>
+<div ref="{{ setRoot }}" style="--accent:#b08d4f;--accent-deep:#97743a;--accent-soft:#f3ead8;min-height:100vh;">
+
+  <!-- ============ NAV ============ -->
+  <header style="position:sticky;top:0;z-index:50;background:rgba(245,244,239,0.88);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid #e4e0d6;">
+    <nav style="max-width:1180px;margin:0 auto;padding:13px clamp(18px,5vw,48px);display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;">
+      <a href="index.html" style="display:flex;align-items:center;gap:11px;text-decoration:none;flex-shrink:0;">
+        <span style="background:#16293f;color:#f5f4ef;font-family:'Schibsted Grotesk';font-weight:700;font-size:13px;letter-spacing:.03em;padding:7px 10px;border-radius:7px;">ACCT 221</span>
+        <span style="font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;color:#16293f;letter-spacing:-0.01em;">Management Accounting 1</span>
+      </a>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
+        <a data-nav="explore" href="explore.html" style="text-decoration:none;color:#3a4550;font-weight:600;font-size:14px;padding:8px 13px;border-radius:8px;transition:all .15s;" style-hover="background:rgba(176,141,79,0.1);color:var(--accent-deep);">Explore</a>
+        <a data-nav="welcome" href="welcome.html" style="text-decoration:none;color:#3a4550;font-weight:600;font-size:14px;padding:8px 13px;border-radius:8px;transition:all .15s;" style-hover="background:rgba(176,141,79,0.1);color:var(--accent-deep);">Welcome</a>
+        <a data-nav="home" href="index.html" style="text-decoration:none;color:#3a4550;font-weight:600;font-size:14px;padding:8px 13px;border-radius:8px;transition:all .15s;" style-hover="background:rgba(176,141,79,0.1);color:var(--accent-deep);">Home</a>
+        <a data-nav="syllabus" href="syllabus.html" style="text-decoration:none;color:#3a4550;font-weight:600;font-size:14px;padding:8px 13px;border-radius:8px;transition:all .15s;" style-hover="background:rgba(176,141,79,0.1);color:var(--accent-deep);">Syllabus</a>
+        <a data-nav="study" href="study-hub.html" style="text-decoration:none;color:#3a4550;font-weight:600;font-size:14px;padding:8px 13px;border-radius:8px;transition:all .15s;" style-hover="background:rgba(176,141,79,0.1);color:var(--accent-deep);">Study Hub</a>
+        <a data-nav="about" href="about-lecturer.html" style="text-decoration:none;color:#3a4550;font-weight:600;font-size:14px;padding:8px 13px;border-radius:8px;transition:all .15s;" style-hover="background:rgba(176,141,79,0.1);color:var(--accent-deep);">Lecturer</a>
+        <a data-nav="student" href="student.html" style="text-decoration:none;color:#3a4550;font-weight:600;font-size:14px;padding:8px 13px;border-radius:8px;transition:all .15s;" style-hover="background:rgba(176,141,79,0.1);color:var(--accent-deep);">Student</a>
+        <a data-nav="active" href="active-learning.html" style="text-decoration:none;color:#3a4550;font-weight:600;font-size:14px;padding:8px 13px;border-radius:8px;transition:all .15s;" style-hover="background:rgba(176,141,79,0.1);color:var(--accent-deep);">Active Learning</a>
+        <a data-nav="relax" href="relaxing-zone.html" style="text-decoration:none;color:#3a4550;font-weight:600;font-size:14px;padding:8px 13px;border-radius:8px;transition:all .15s;" style-hover="background:rgba(176,141,79,0.1);color:var(--accent-deep);">Relaxing Zone</a>
+        <a data-nav="chatbot" href="ma2-chatbot.html" style="text-decoration:none;color:#3a4550;font-weight:600;font-size:14px;padding:8px 13px;border-radius:8px;transition:all .15s;" style-hover="background:rgba(176,141,79,0.1);color:var(--accent-deep);">MA2 Chatbot</a>
+      </div>
+    </nav>
+  </header>
+
+  <!-- ============ INTRO ============ -->
+  <section id="intro" data-screen-label="Student · Intro" style="scroll-margin-top:74px;padding:clamp(56px,8vw,100px) 0 clamp(30px,4vw,48px);background:#f5f4ef;">
+    <div style="max-width:1180px;margin:0 auto;padding:0 clamp(18px,5vw,48px);">
+      <p style="margin:0 0 12px;font-size:13px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-deep);">Section 04</p>
+      <h2 style="margin:0 0 14px;font-family:'Schibsted Grotesk';font-weight:700;font-size:clamp(28px,4vw,44px);letter-spacing:-0.02em;color:#16293f;">Student Zone</h2>
+      <p style="margin:0 0 clamp(30px,4vw,44px);max-width:62ch;font-size:16px;line-height:1.7;color:#4a5560;">Introduce yourself to the class and project your course grade across the seven Course Learning Outcomes (CLOs) for Management Accounting 1.</p>
+
+      <!-- Self-Introduction -->
+      <div style="background:#16293f;border-radius:18px;padding:clamp(24px,3.5vw,36px);display:flex;align-items:center;gap:26px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:240px;">
+          <h4 style="margin:0 0 9px;font-family:'Schibsted Grotesk';font-weight:700;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);">Start here</h4>
+          <p style="margin:0 0 6px;font-family:'Schibsted Grotesk';font-weight:700;font-size:clamp(20px,2.6vw,26px);line-height:1.25;color:#f5f4ef;">Self-Introduction</p>
+          <p style="margin:0;font-size:14.5px;line-height:1.6;color:#9fb0c0;max-width:52ch;">Post a short introduction about yourself on the class Padlet board — your name, background and what you hope to get from the course. Say hello to your classmates.</p>
+        </div>
+        <a href="https://padlet.com/kprofessor1/jd26-introduction-to-management-accounting-32qb9w9uas37srwo" target="_blank" rel="noopener" style="flex-shrink:0;display:inline-flex;align-items:center;gap:9px;background:var(--accent);color:#16293f;text-decoration:none;font-family:'Schibsted Grotesk';font-weight:700;font-size:15px;padding:13px 22px;border-radius:11px;transition:transform .15s;" style-hover="transform:translateY(-2px);">Open Padlet board →</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ GRADE CALCULATOR ============ -->
+  <section id="grades" data-screen-label="Grade Calculator" style="scroll-margin-top:74px;padding:clamp(40px,6vw,72px) 0 clamp(56px,8vw,90px);background:#f5f4ef;">
+    <div style="max-width:1180px;margin:0 auto;padding:0 clamp(18px,5vw,48px);">
+      <p style="margin:0 0 12px;font-size:13px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-deep);">CLO grade calculator</p>
+      <h3 style="margin:0 0 14px;font-family:'Schibsted Grotesk';font-weight:700;font-size:clamp(24px,3.4vw,34px);letter-spacing:-0.02em;color:#16293f;">Project your course grade</h3>
+      <p style="margin:0 0 30px;max-width:66ch;font-size:15.5px;line-height:1.7;color:#4a5560;">Enter the mark (%) you expect for each assessment component. Each Course Learning Outcome is scored from those components, and your course grade is the CLO-weighted total — exactly as in the official CLO Assessment &amp; Scoring scheme.</p>
+
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(250px,330px);gap:clamp(22px,3vw,36px);align-items:start;">
+
+        <!-- Inputs -->
+        <div style="background:#fff;border:1px solid #e4e0d6;border-radius:18px;padding:clamp(18px,3vw,28px);">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+            <span style="font-family:'Schibsted Grotesk';font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#8a8678;">Your marks (%)</span>
+            <button data-grade-reset type="button" style="border:none;background:none;color:var(--accent-deep);font-family:'Public Sans';font-weight:600;font-size:13px;cursor:pointer;">Reset</button>
+          </div>
+          <p style="margin:0 0 6px;font-size:13px;color:#6b7480;line-height:1.5;">Enter each component out of 100. Leave blank for 0.</p>
+
+          <div style="display:grid;grid-template-columns:16px 1fr auto;align-items:center;gap:14px;padding:15px 0;border-bottom:1px solid #eceadf;">
+            <span style="width:14px;height:14px;border-radius:4px;background:#5b6b7d;"></span>
+            <div style="font-family:'Schibsted Grotesk';font-weight:700;font-size:15.5px;color:#16293f;">Participation</div>
+            <div style="display:flex;align-items:center;gap:6px;"><input data-grade="participation" type="number" min="0" max="100" placeholder="0" style="width:74px;padding:9px 10px;border:1px solid #d6d1c4;border-radius:9px;font-family:'Public Sans';font-size:15px;font-weight:600;color:#16293f;text-align:right;background:#fff;" /><span style="font-size:13px;color:#8a8678;font-weight:600;">%</span></div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:16px 1fr auto;align-items:center;gap:14px;padding:15px 0;border-bottom:1px solid #eceadf;">
+            <span style="width:14px;height:14px;border-radius:4px;background:#1e3a5f;"></span>
+            <div style="font-family:'Schibsted Grotesk';font-weight:700;font-size:15.5px;color:#16293f;">Tests</div>
+            <div style="display:flex;align-items:center;gap:6px;"><input data-grade="tests" type="number" min="0" max="100" placeholder="0" style="width:74px;padding:9px 10px;border:1px solid #d6d1c4;border-radius:9px;font-family:'Public Sans';font-size:15px;font-weight:600;color:#16293f;text-align:right;background:#fff;" /><span style="font-size:13px;color:#8a8678;font-weight:600;">%</span></div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:16px 1fr auto;align-items:center;gap:14px;padding:15px 0;border-bottom:1px solid #eceadf;">
+            <span style="width:14px;height:14px;border-radius:4px;background:var(--accent);"></span>
+            <div style="font-family:'Schibsted Grotesk';font-weight:700;font-size:15.5px;color:#16293f;">Project</div>
+            <div style="display:flex;align-items:center;gap:6px;"><input data-grade="project" type="number" min="0" max="100" placeholder="0" style="width:74px;padding:9px 10px;border:1px solid #d6d1c4;border-radius:9px;font-family:'Public Sans';font-size:15px;font-weight:600;color:#16293f;text-align:right;background:#fff;" /><span style="font-size:13px;color:#8a8678;font-weight:600;">%</span></div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:16px 1fr auto;align-items:center;gap:14px;padding:15px 0;border-bottom:1px solid #eceadf;">
+            <span style="width:14px;height:14px;border-radius:4px;background:#16293f;"></span>
+            <div style="font-family:'Schibsted Grotesk';font-weight:700;font-size:15.5px;color:#16293f;">Midterm Exam</div>
+            <div style="display:flex;align-items:center;gap:6px;"><input data-grade="midterm" type="number" min="0" max="100" placeholder="0" style="width:74px;padding:9px 10px;border:1px solid #d6d1c4;border-radius:9px;font-family:'Public Sans';font-size:15px;font-weight:600;color:#16293f;text-align:right;background:#fff;" /><span style="font-size:13px;color:#8a8678;font-weight:600;">%</span></div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:16px 1fr auto;align-items:center;gap:14px;padding:15px 0;">
+            <span style="width:14px;height:14px;border-radius:4px;background:var(--accent-deep);"></span>
+            <div style="font-family:'Schibsted Grotesk';font-weight:700;font-size:15.5px;color:#16293f;">Final Exam</div>
+            <div style="display:flex;align-items:center;gap:6px;"><input data-grade="final" type="number" min="0" max="100" placeholder="0" style="width:74px;padding:9px 10px;border:1px solid #d6d1c4;border-radius:9px;font-family:'Public Sans';font-size:15px;font-weight:600;color:#16293f;text-align:right;background:#fff;" /><span style="font-size:13px;color:#8a8678;font-weight:600;">%</span></div>
+          </div>
+        </div>
+
+        <!-- Result -->
+        <div style="background:#16293f;border-radius:18px;padding:clamp(22px,3vw,30px);color:#fff;position:sticky;top:90px;">
+          <p style="margin:0 0 18px;font-family:'Schibsted Grotesk';font-weight:700;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);">Projected course grade</p>
+          <div style="display:flex;justify-content:center;margin-bottom:20px;">
+            <div data-ring style="position:relative;width:186px;height:186px;border-radius:50%;background:conic-gradient(var(--accent) 0 0%, rgba(255,255,255,0.12) 0% 100%);">
+              <div style="position:absolute;inset:19px;background:#16293f;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+                <span data-total style="font-family:'Schibsted Grotesk';font-weight:800;font-size:42px;line-height:1;color:#f5f4ef;">0.0</span>
+                <span style="font-size:12px;color:#9fb0c0;letter-spacing:.04em;margin-top:4px;">course score</span>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;">
+            <div style="flex:1;background:rgba(255,255,255,0.06);border-radius:12px;padding:12px 14px;text-align:center;">
+              <div style="font-size:11px;color:#9fb0c0;letter-spacing:.04em;margin-bottom:4px;">Grade</div>
+              <div data-letter style="font-family:'Schibsted Grotesk';font-weight:800;font-size:26px;color:var(--accent);line-height:1;">—</div>
+            </div>
+            <div style="flex:1;background:rgba(255,255,255,0.06);border-radius:12px;padding:12px 14px;text-align:center;">
+              <div style="font-size:11px;color:#9fb0c0;letter-spacing:.04em;margin-bottom:4px;">GPA</div>
+              <div data-gpa style="font-family:'Schibsted Grotesk';font-weight:800;font-size:26px;color:#f5f4ef;line-height:1;">—</div>
+            </div>
+          </div>
+          <p data-achievement style="margin:12px 0 0;font-size:13px;line-height:1.5;color:#cdd5dd;text-align:center;font-weight:600;">Enter your marks to see your result.</p>
+          <p style="margin:12px 0 0;font-size:12px;line-height:1.5;color:#7e90a2;">Saved on this device. Indicative only — official grades follow the course specification.</p>
+        </div>
+
+      </div>
+
+      <!-- CLO breakdown -->
+      <div data-clo-block style="margin-top:clamp(22px,3vw,32px);background:#fff;border:1px solid #e4e0d6;border-radius:18px;padding:clamp(18px,3vw,28px);">
+        <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px;">
+          <span style="font-family:'Schibsted Grotesk';font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#8a8678;">Learning outcome breakdown</span>
+          <span style="font-size:12.5px;color:#8a8678;">Score · weight toward course grade</span>
+        </div>
+        <div data-clo-list></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ STUDENT TOOLKIT ============ -->
+  <section id="toolkit" data-screen-label="Student Toolkit" style="scroll-margin-top:74px;padding:clamp(40px,6vw,72px) 0 clamp(56px,8vw,90px);background:#f5f4ef;border-top:1px solid #e4e0d6;">
+    <div style="max-width:1180px;margin:0 auto;padding:0 clamp(18px,5vw,48px);">
+      <p style="margin:0 0 12px;font-size:13px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-deep);">Toolkit</p>
+      <h3 style="margin:0 0 14px;font-family:'Schibsted Grotesk';font-weight:700;font-size:clamp(24px,3.4vw,34px);letter-spacing:-0.02em;color:#16293f;">Working tools for class</h3>
+      <p style="margin:0 0 28px;max-width:66ch;font-size:15.5px;line-height:1.7;color:#4a5560;">A scientific calculator for problem sets, and the shared class spreadsheet — both live, right here.</p>
+
+      <div style="display:grid;grid-template-columns:minmax(300px,360px) minmax(0,1fr) minmax(0,1fr);gap:clamp(18px,2.5vw,24px);align-items:start;">
+
+        <!-- Scientific calculator -->
+        <div style="background:#fff;border:1px solid #e4e0d6;border-radius:18px;padding:clamp(16px,2vw,20px);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+            <span style="font-family:'Schibsted Grotesk';font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#8a8678;">Scientific calculator</span>
+            <button data-calc-deg type="button" style="flex-shrink:0;background:var(--accent-soft);color:var(--accent-deep);border:none;border-radius:8px;padding:6px 11px;font-family:'Schibsted Grotesk';font-weight:700;font-size:12px;cursor:pointer;">DEG</button>
+          </div>
+
+          <!-- Display -->
+          <div style="background:#16293f;border-radius:12px;padding:14px 16px;margin-bottom:12px;">
+            <div data-calc-small style="min-height:16px;font-size:12.5px;color:#7e90a2;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">&nbsp;</div>
+            <div data-calc-main style="font-family:'Schibsted Grotesk';font-weight:700;font-size:30px;color:#f5f4ef;text-align:right;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">0</div>
+          </div>
+
+          <!-- Buttons -->
+          <div data-calc-pad style="display:grid;grid-template-columns:repeat(5,1fr);gap:7px;">
+            <button type="button" data-action="clear" style="grid-column:span 2;background:transparent;border:1px solid #d6d1c4;color:#4a5560;border-radius:9px;padding:11px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:14px;cursor:pointer;">C</button>
+            <button type="button" data-action="back" style="background:transparent;border:1px solid #d6d1c4;color:#4a5560;border-radius:9px;padding:11px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">⌫</button>
+            <button type="button" data-disp="(" data-val="(" style="background:var(--accent-soft);border:none;color:var(--accent-deep);border-radius:9px;padding:11px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">(</button>
+            <button type="button" data-disp=")" data-val=")" style="background:var(--accent-soft);border:none;color:var(--accent-deep);border-radius:9px;padding:11px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">)</button>
+
+            <button type="button" data-disp="sin(" data-val="sin(" style="background:var(--accent-soft);border:none;color:var(--accent-deep);border-radius:9px;padding:11px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:14px;cursor:pointer;">sin</button>
+            <button type="button" data-disp="cos(" data-val="cos(" style="background:var(--accent-soft);border:none;color:var(--accent-deep);border-radius:9px;padding:11px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:14px;cursor:pointer;">cos</button>
+            <button type="button" data-disp="tan(" data-val="tan(" style="background:var(--accent-soft);border:none;color:var(--accent-deep);border-radius:9px;padding:11px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:14px;cursor:pointer;">tan</button>
+            <button type="button" data-disp="√(" data-val="sqrt(" style="background:var(--accent-soft);border:none;color:var(--accent-deep);border-radius:9px;padding:11px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">√</button>
+            <button type="button" data-disp="^" data-val="**" style="background:var(--accent-soft);border:none;color:var(--accent-deep);border-radius:9px;padding:11px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">^</button>
+
+            <button type="button" data-disp="ln(" data-val="ln(" style="background:var(--accent-soft);border:none;color:var(--accent-deep);border-radius:9px;padding:11px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:14px;cursor:pointer;">ln</button>
+            <button type="button" data-disp="log(" data-val="log(" style="background:var(--accent-soft);border:none;color:var(--accent-deep);border-radius:9px;padding:11px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:14px;cursor:pointer;">log</button>
+            <button type="button" data-disp="π" data-val="PI" style="background:var(--accent-soft);border:none;color:var(--accent-deep);border-radius:9px;padding:11px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">π</button>
+            <button type="button" data-disp="e" data-val="E" style="background:var(--accent-soft);border:none;color:var(--accent-deep);border-radius:9px;padding:11px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">e</button>
+            <button type="button" data-disp="%" data-val="/100" style="background:var(--accent-soft);border:none;color:var(--accent-deep);border-radius:9px;padding:11px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">%</button>
+
+            <button type="button" data-num="7" style="background:#fff;border:1px solid #e4e0d6;color:#16293f;border-radius:9px;padding:13px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">7</button>
+            <button type="button" data-num="8" style="background:#fff;border:1px solid #e4e0d6;color:#16293f;border-radius:9px;padding:13px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">8</button>
+            <button type="button" data-num="9" style="background:#fff;border:1px solid #e4e0d6;color:#16293f;border-radius:9px;padding:13px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">9</button>
+            <button type="button" data-disp="/" data-val="/" style="background:#16293f;border:none;color:#f5f4ef;border-radius:9px;padding:13px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">÷</button>
+            <button type="button" data-disp="*" data-val="*" style="background:#16293f;border:none;color:#f5f4ef;border-radius:9px;padding:13px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">×</button>
+
+            <button type="button" data-num="4" style="background:#fff;border:1px solid #e4e0d6;color:#16293f;border-radius:9px;padding:13px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">4</button>
+            <button type="button" data-num="5" style="background:#fff;border:1px solid #e4e0d6;color:#16293f;border-radius:9px;padding:13px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">5</button>
+            <button type="button" data-num="6" style="background:#fff;border:1px solid #e4e0d6;color:#16293f;border-radius:9px;padding:13px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">6</button>
+            <button type="button" data-disp="-" data-val="-" style="background:#16293f;border:none;color:#f5f4ef;border-radius:9px;padding:13px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">−</button>
+            <button type="button" data-disp="+" data-val="+" style="background:#16293f;border:none;color:#f5f4ef;border-radius:9px;padding:13px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">+</button>
+
+            <button type="button" data-num="1" style="background:#fff;border:1px solid #e4e0d6;color:#16293f;border-radius:9px;padding:13px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">1</button>
+            <button type="button" data-num="2" style="background:#fff;border:1px solid #e4e0d6;color:#16293f;border-radius:9px;padding:13px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">2</button>
+            <button type="button" data-num="3" style="background:#fff;border:1px solid #e4e0d6;color:#16293f;border-radius:9px;padding:13px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">3</button>
+            <button type="button" data-num="." style="background:#fff;border:1px solid #e4e0d6;color:#16293f;border-radius:9px;padding:13px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">.</button>
+            <button type="button" data-action="equals" style="grid-row:span 2;background:var(--accent);border:none;color:#16293f;border-radius:9px;padding:13px 0;font-family:'Schibsted Grotesk';font-weight:800;font-size:18px;cursor:pointer;">=</button>
+
+            <button type="button" data-num="0" style="grid-column:span 4;background:#fff;border:1px solid #e4e0d6;color:#16293f;border-radius:9px;padding:13px 0;font-family:'Schibsted Grotesk';font-weight:700;font-size:16px;cursor:pointer;">0</button>
+          </div>
+        </div>
+
+        <!-- Class spreadsheet -->
+        <a href="https://docs.google.com/spreadsheets/d/1oCtvK7cQ45MdvMEvFkosoegR0KEQCNt8dG8VTvoqaE4/edit?usp=sharing" target="_blank" rel="noopener" style="text-decoration:none;background:#fff;border:1px solid #e4e0d6;border-radius:18px;padding:clamp(28px,4vw,44px);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:16px;min-height:420px;transition:border-color .15s,transform .15s;" style-hover="border-color:var(--accent);transform:translateY(-2px);">
+          <span style="width:72px;height:72px;border-radius:16px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;">
+            <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="var(--accent-deep)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4" y="3" width="16" height="18" rx="2"></rect>
+              <line x1="4" y1="9" x2="20" y2="9"></line>
+              <line x1="4" y1="14" x2="20" y2="14"></line>
+              <line x1="9.5" y1="9" x2="9.5" y2="21"></line>
+              <line x1="14.5" y1="9" x2="14.5" y2="21"></line>
+            </svg>
+          </span>
+          <div>
+            <p style="margin:0 0 6px;font-family:'Schibsted Grotesk';font-weight:700;font-size:18px;color:#16293f;">Class spreadsheet</p>
+            <p style="margin:0;font-size:14px;line-height:1.6;color:#6b7480;max-width:34ch;">Shared Google Sheet for class data and calculations.</p>
+          </div>
+          <span style="display:inline-flex;align-items:center;gap:7px;background:var(--accent);color:#16293f;font-family:'Schibsted Grotesk';font-weight:700;font-size:14px;padding:11px 20px;border-radius:10px;">Open in Google Sheets ↗</span>
+        </a>
+
+        <!-- Class whiteboard -->
+        <a href="https://padlet.com/kprofessor1/ma2-whiteboard-for-students-a61ow0ple3wuvdsi" target="_blank" rel="noopener" style="text-decoration:none;background:#fff;border:1px solid #e4e0d6;border-radius:18px;padding:clamp(28px,4vw,44px);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:16px;min-height:420px;transition:border-color .15s,transform .15s;" style-hover="border-color:var(--accent);transform:translateY(-2px);">
+          <span style="width:72px;height:72px;border-radius:16px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;">
+            <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="var(--accent-deep)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3.5" y="4.5" width="17" height="13" rx="2"></rect>
+              <path d="M7 13 Q9.5 8 12.5 11 T17.5 9"></path>
+              <line x1="9" y1="20.5" x2="15" y2="20.5"></line>
+            </svg>
+          </span>
+          <div>
+            <p style="margin:0 0 6px;font-family:'Schibsted Grotesk';font-weight:700;font-size:18px;color:#16293f;">Class whiteboard</p>
+            <p style="margin:0;font-size:14px;line-height:1.6;color:#6b7480;max-width:34ch;">Shared Padlet board for class brainstorming and notes.</p>
+          </div>
+          <span style="display:inline-flex;align-items:center;gap:7px;background:var(--accent);color:#16293f;font-family:'Schibsted Grotesk';font-weight:700;font-size:14px;padding:11px 20px;border-radius:10px;">Open whiteboard ↗</span>
+        </a>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STUDY CHECKLIST ============ -->
+  <section id="checklist" data-screen-label="Study Checklist" style="scroll-margin-top:74px;padding:clamp(40px,6vw,72px) 0 clamp(56px,8vw,90px);background:#f5f4ef;border-top:1px solid #e4e0d6;">
+    <div style="max-width:1180px;margin:0 auto;padding:0 clamp(18px,5vw,48px);">
+      <p style="margin:0 0 12px;font-size:13px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-deep);">Study checklist</p>
+      <h3 style="margin:0 0 14px;font-family:'Schibsted Grotesk';font-weight:700;font-size:clamp(24px,3.4vw,34px);letter-spacing:-0.02em;color:#16293f;">Make every chapter count</h3>
+      <p style="margin:0 0 28px;max-width:66ch;font-size:15.5px;line-height:1.7;color:#4a5560;">Work through these steps for each chapter to get the most out of the course. Tick items off as you go — your progress is saved on this device.</p>
+
+      <!-- Progress -->
+      <div style="background:#16293f;border-radius:18px;padding:clamp(20px,3vw,28px);color:#fff;margin-bottom:26px;display:flex;align-items:center;gap:28px;flex-wrap:wrap;">
+        <div style="position:relative;flex-shrink:0;width:88px;height:88px;">
+          <svg width="88" height="88" viewBox="0 0 88 88" style="transform:rotate(-90deg);">
+            <circle cx="44" cy="44" r="38" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="8"></circle>
+            <circle data-check-ring cx="44" cy="44" r="38" fill="none" stroke="var(--accent)" stroke-width="8" stroke-linecap="round" stroke-dasharray="238.76" stroke-dashoffset="238.76" style="transition:stroke-dashoffset .5s cubic-bezier(.2,.7,.2,1);"></circle>
+          </svg>
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">
+            <span data-check-pct style="font-family:'Schibsted Grotesk';font-weight:800;font-size:22px;color:#fff;">0%</span>
+          </div>
+        </div>
+        <div style="flex:1;min-width:220px;">
+          <div data-check-label style="font-family:'Schibsted Grotesk';font-weight:700;font-size:clamp(17px,2vw,20px);color:#f5f4ef;margin-bottom:6px;">0 of 31 steps complete</div>
+          <p data-check-sub style="margin:0;font-size:14px;color:#9fb0c0;line-height:1.5;">Tick items off as you work through each chapter — your progress is saved on this device.</p>
+        </div>
+        <button data-check-reset type="button" style="flex-shrink:0;background:rgba(255,255,255,0.08);color:#f5f4ef;border:1px solid rgba(255,255,255,0.18);border-radius:10px;padding:11px 18px;font-family:'Schibsted Grotesk';font-weight:700;font-size:14px;cursor:pointer;transition:background .15s;" style-hover="background:rgba(255,255,255,0.16);">Reset checklist</button>
+      </div>
+
+      <!-- Groups -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;align-items:start;">
+
+        <div data-check-group="g1" style="background:#fff;border:1px solid #e4e0d6;border-radius:16px;padding:14px 16px;transition:border-color .2s;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <h4 style="margin:0;font-family:'Schibsted Grotesk';font-weight:700;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-deep);">Before each class</h4>
+            <span data-group-badge style="flex-shrink:0;font-family:'Schibsted Grotesk';font-weight:700;font-size:12px;color:#8a8678;background:#f5f4ef;border-radius:99px;padding:3px 9px;transition:all .15s;">0/8</span>
+          </div>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g1_1" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Check what topic the class will cover.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g1_2" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Read the textbook page, slides, or notes quickly.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g1_3" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Write down 2–3 questions about the topic.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g1_4" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Review the last lesson for 5–10 minutes.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g1_5" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Complete any homework due.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g1_6" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Pack the right books, notebook, calculator, pens, or materials.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g1_7" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Bring your past notes or worksheets if needed.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g1_8" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Get enough sleep so you can focus.</span>
+          </label>
+        </div>
+
+        <div data-check-group="g2" style="background:#fff;border:1px solid #e4e0d6;border-radius:16px;padding:14px 16px;transition:border-color .2s;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <h4 style="margin:0;font-family:'Schibsted Grotesk';font-weight:700;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-deep);">During class</h4>
+            <span data-group-badge style="flex-shrink:0;font-family:'Schibsted Grotesk';font-weight:700;font-size:12px;color:#8a8678;background:#f5f4ef;border-radius:99px;padding:3px 9px;transition:all .15s;">0/10</span>
+          </div>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g2_1" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Pay attention to the teacher's explanations.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g2_2" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Listen for repeated points because they are usually important.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g2_3" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Watch how examples are solved.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g2_4" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Avoid copying without understanding.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g2_5" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Stay involved by thinking: "Why does this work?"</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g2_6" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Write the main idea of the lesson.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g2_7" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Mark anything confusing with a star or question mark.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g2_8" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Ask when you do not understand something.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g2_9" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Answer questions when you can.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g2_10" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Try questions by yourself before asking for help.</span>
+          </label>
+        </div>
+
+        <div data-check-group="g3" style="background:#fff;border:1px solid #e4e0d6;border-radius:16px;padding:14px 16px;transition:border-color .2s;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <h4 style="margin:0;font-family:'Schibsted Grotesk';font-weight:700;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-deep);">After class</h4>
+            <span data-group-badge style="flex-shrink:0;font-family:'Schibsted Grotesk';font-weight:700;font-size:12px;color:#8a8678;background:#f5f4ef;border-radius:99px;padding:3px 9px;transition:all .15s;">0/9</span>
+          </div>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g3_1" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Review your notes within 24 hours.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g3_2" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Summarize the lesson in 3–5 sentences.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g3_3" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Make flashcards for key facts, formulas, vocabulary, quotes, or definitions.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g3_4" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Do a quick self-test without looking at your notes.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g3_5" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Homework and practice.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g3_6" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Check your answers carefully.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g3_7" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Write down mistakes in a mistake log.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g3_8" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Redo questions you got wrong.</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g3_9" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Ask your teacher or a classmate about anything still confusing.</span>
+          </label>
+        </div>
+
+        <div data-check-group="g4" style="background:#fff;border:1px solid #e4e0d6;border-radius:16px;padding:14px 16px;transition:border-color .2s;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <h4 style="margin:0;font-family:'Schibsted Grotesk';font-weight:700;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-deep);">Exam preparation</h4>
+            <span data-group-badge style="flex-shrink:0;font-family:'Schibsted Grotesk';font-weight:700;font-size:12px;color:#8a8678;background:#f5f4ef;border-radius:99px;padding:3px 9px;transition:all .15s;">0/4</span>
+          </div>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g4_1" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Redo all quizzes and flashcards across the chapters</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g4_2" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Practise full questions under timed, exam-like conditions</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g4_3" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Build a single formula sheet for the whole course</span>
+          </label>
+          <label style="position:relative;display:flex;align-items:flex-start;gap:12px;padding:8px;margin:0 -8px;border-radius:8px;cursor:pointer;transition:background .15s;" style-hover="background:#faf9f5;">
+            <span data-check-box style="position:relative;flex-shrink:0;width:22px;height:22px;margin-top:1px;border-radius:7px;border:2px solid #d6d1c4;background:#fff;transition:all .18s cubic-bezier(.2,.7,.2,1);">
+              <input type="checkbox" data-check="g4_4" style="position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;" />
+              <svg data-check-icon viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:2px;left:2px;opacity:0;transform:scale(.4);transition:all .18s cubic-bezier(.2,.7,.2,1);"><polyline points="4 12 9 18 20 6"></polyline></svg>
+            </span>
+            <span style="font-size:13.5px;line-height:1.45;color:#3a4550;transition:color .15s;">Book a consultation for anything still unclear</span>
+          </label>
+        </div>
+
+      </div>
+
+      <!-- Study tips -->
+      <h4 style="margin:clamp(36px,5vw,52px) 0 16px;font-family:'Schibsted Grotesk';font-weight:700;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:#8a8678;">Study tips</h4>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;">
+        <div style="background:#fff;border:1px solid #e4e0d6;border-radius:14px;padding:20px;">
+          <p style="margin:0 0 8px;font-family:'Schibsted Grotesk';font-weight:700;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-deep);">Space it out</p>
+          <p style="margin:0;font-size:14px;line-height:1.6;color:#4a5560;">Short, frequent sessions beat one long cram. Revisit each chapter a few days later to lock it in.</p>
+        </div>
+        <div style="background:#fff;border:1px solid #e4e0d6;border-radius:14px;padding:20px;">
+          <p style="margin:0 0 8px;font-family:'Schibsted Grotesk';font-weight:700;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-deep);">Recall, don't reread</p>
+          <p style="margin:0;font-size:14px;line-height:1.6;color:#4a5560;">Close your notes and try to redo the calculation or explain the idea from memory. Struggling is where learning happens.</p>
+        </div>
+        <div style="background:#fff;border:1px solid #e4e0d6;border-radius:14px;padding:20px;">
+          <p style="margin:0 0 8px;font-family:'Schibsted Grotesk';font-weight:700;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-deep);">Do the numbers</p>
+          <p style="margin:0;font-size:14px;line-height:1.6;color:#4a5560;">Management accounting rewards practice. Work problems by hand until the method feels automatic.</p>
+        </div>
+        <div style="background:#fff;border:1px solid #e4e0d6;border-radius:14px;padding:20px;">
+          <p style="margin:0 0 8px;font-family:'Schibsted Grotesk';font-weight:700;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-deep);">Understand the why</p>
+          <p style="margin:0;font-size:14px;line-height:1.6;color:#4a5560;">Know why a formula works, not just the steps — that's what lets you handle unfamiliar exam questions.</p>
+        </div>
+        <div style="background:#fff;border:1px solid #e4e0d6;border-radius:14px;padding:20px;">
+          <p style="margin:0 0 8px;font-family:'Schibsted Grotesk';font-weight:700;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-deep);">Keep an error log</p>
+          <p style="margin:0;font-size:14px;line-height:1.6;color:#4a5560;">Track the questions you get wrong and revisit them before the exam — your mistakes are your best study guide.</p>
+        </div>
+        <div style="background:#fff;border:1px solid #e4e0d6;border-radius:14px;padding:20px;">
+          <p style="margin:0 0 8px;font-family:'Schibsted Grotesk';font-weight:700;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-deep);">Teach a classmate</p>
+          <p style="margin:0;font-size:14px;line-height:1.6;color:#4a5560;">Explaining a topic out loud quickly reveals the gaps in your own understanding — and helps you both.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer style="background:#16293f;color:#cdd5dd;">
+    <div style="max-width:1180px;margin:0 auto;padding:clamp(44px,6vw,68px) clamp(18px,5vw,48px) 28px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:36px;">
+      <div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;"><span style="background:var(--accent);color:#16293f;font-family:'Schibsted Grotesk';font-weight:700;font-size:12px;padding:6px 9px;border-radius:6px;">ACCT 221</span><span style="font-family:'Schibsted Grotesk';font-weight:700;font-size:15px;color:#f5f4ef;">Management Accounting 1</span></div>
+        <p style="margin:0;font-size:13.5px;line-height:1.6;color:#9fb0c0;max-width:34ch;">Second-year Foundations in Accountancy. Costing, decision-making and cash management for internal reporting.</p>
+      </div>
+      <div>
+        <p style="margin:0 0 14px;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#7e90a2;">Navigate</p>
+        <div style="display:grid;gap:9px;">
+          <a href="index.html" style="text-decoration:none;color:#cdd5dd;font-size:14px;transition:color .15s;" style-hover="color:var(--accent);">Home</a>
+          <a href="syllabus.html" style="text-decoration:none;color:#cdd5dd;font-size:14px;transition:color .15s;" style-hover="color:var(--accent);">Syllabus &amp; Schedule</a>
+          <a href="study-hub.html" style="text-decoration:none;color:#cdd5dd;font-size:14px;transition:color .15s;" style-hover="color:var(--accent);">Study Reference Hub</a>
+          <a href="about-lecturer.html" style="text-decoration:none;color:#cdd5dd;font-size:14px;transition:color .15s;" style-hover="color:var(--accent);">About the Lecturer</a>
+          <a href="student.html" style="text-decoration:none;color:#cdd5dd;font-size:14px;transition:color .15s;" style-hover="color:var(--accent);">Student Zone</a>
+          <a href="active-learning.html" style="text-decoration:none;color:#cdd5dd;font-size:14px;transition:color .15s;" style-hover="color:var(--accent);">Active Learning</a>
+          <a href="ma2-chatbot.html" style="text-decoration:none;color:#cdd5dd;font-size:14px;transition:color .15s;" style-hover="color:var(--accent);">MA2 Chatbot</a>
+        </div>
+      </div>
+      <div>
+        <p style="margin:0 0 14px;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#7e90a2;">Contact</p>
+        <div style="display:grid;gap:9px;font-size:14px;line-height:1.5;">
+          <span style="color:#f5f4ef;font-weight:600;">Mean Udam, MSc, ACCA</span>
+          <a href="mailto:mudam@cam-ed.com" style="text-decoration:none;color:var(--accent);font-weight:600;transition:color .15s;" style-hover="color:#c79e5b;">mudam@cam-ed.com</a>
+          <span style="color:#9fb0c0;">CamEd Business School</span>
+          <span style="color:#9fb0c0;">Term: July – December 2026</span>
+        </div>
+      </div>
+    </div>
+    <div style="border-top:1px solid rgba(255,255,255,0.1);">
+      <div style="max-width:1180px;margin:0 auto;padding:18px clamp(18px,5vw,48px);display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;font-size:12.5px;color:#7e90a2;">
+        <span>© 2026 Management Accounting 1 · ACCT 221</span>
+        <span>Course hub · syllabus · study reference</span>
+      </div>
+    </div>
+  </footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#b08d4f&quot;,&quot;options&quot;:[&quot;#b08d4f&quot;,&quot;#1f7a6d&quot;,&quot;#8c2f39&quot;,&quot;#3a6ea5&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Appearance&quot;},&quot;showGradeCalculator&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Sections&quot;},&quot;showCLOBreakdown&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Sections&quot;}}">
+class Component extends DCLogic {
+  state = { activeSection: 'intro' };
+
+  componentDidMount() {
+    this.comps = [
+      { key: 'participation', label: 'Participation' },
+      { key: 'tests', label: 'Tests' },
+      { key: 'project', label: 'Project' },
+      { key: 'midterm', label: 'Midterm Exam' },
+      { key: 'final', label: 'Final Exam' }
+    ];
+    // CLO scoring: each CLO score = sum(component mark x its weight within the CLO).
+    // Weights within each CLO sum to 100. `weight` = the CLO's weighting toward the course grade.
+    this.clos = [
+      { code: 'CK1', name: 'Describe Management Information', weight: 15, w: { participation: 0, tests: 10, project: 65, midterm: 10, final: 15 } },
+      { code: 'CK2', name: 'Identify Investment & Financing Opportunities', weight: 10, w: { participation: 20, tests: 30, project: 0, midterm: 20, final: 30 } },
+      { code: 'CC1', name: 'Prepare Cost Information', weight: 15, w: { participation: 20, tests: 20, project: 0, midterm: 30, final: 30 } },
+      { code: 'CC2', name: 'Apply Principles of Cash Management & Budgeting', weight: 10, w: { participation: 10, tests: 35, project: 0, midterm: 30, final: 25 } },
+      { code: 'CCIT1', name: 'Evaluate Costs of an Organization', weight: 20, w: { participation: 10, tests: 35, project: 0, midterm: 30, final: 25 } },
+      { code: 'CCIT2', name: 'Apply Management Accounting Techniques in Decision-making', weight: 10, w: { participation: 20, tests: 20, project: 0, midterm: 30, final: 30 } },
+      { code: 'CIP1', name: 'Work in team to apply the concept of information comparison', weight: 20, w: { participation: 0, tests: 0, project: 100, midterm: 0, final: 0 } }
+    ];
+    this.applyTweaks();
+    this.paintNav();
+    this.initGrades();
+    this.initChecklist();
+    this.initCalc();
+  }
+  componentDidUpdate() { this.applyTweaks(); }
+
+  applyTweaks() {
+    if (!this.rootEl) return;
+    this.rootEl.style.setProperty('--accent', this.props.accent || '#b08d4f');
+    const g = this.rootEl.querySelector('#grades');
+    if (g) g.style.display = (this.props.showGradeCalculator === false) ? 'none' : '';
+    const clo = this.rootEl.querySelector('[data-clo-block]');
+    if (clo) clo.style.display = (this.props.showCLOBreakdown === false) ? 'none' : '';
+  }
+  paintNav() {
+    if (!this.rootEl) return;
+    this.rootEl.querySelectorAll('[data-nav]').forEach((a) => {
+      const active = a.getAttribute('data-nav') === 'student';
+      a.style.color = active ? 'var(--accent-deep)' : '#3a4550';
+      a.style.background = active ? 'rgba(176,141,79,0.12)' : 'transparent';
+    });
+  }
+
+  esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  lsGet(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
+  lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+  initGrades() {
+    const saved = this.lsGet('ma2-student-grades') || {};
+    this.rootEl.querySelectorAll('[data-grade]').forEach((inp) => {
+      const k = inp.getAttribute('data-grade');
+      if (saved[k] != null && saved[k] !== '') inp.value = saved[k];
+      inp.addEventListener('input', () => this.computeGrades());
+    });
+    const reset = this.rootEl.querySelector('[data-grade-reset]');
+    if (reset) reset.addEventListener('click', () => {
+      this.rootEl.querySelectorAll('[data-grade]').forEach((i) => { i.value = ''; });
+      this.computeGrades();
+    });
+    this.computeGrades();
+  }
+
+  computeGrades() {
+    // read component marks
+    const scores = {}; const store = {}; let anyEntered = false;
+    this.comps.forEach((c) => {
+      const inp = this.rootEl.querySelector('[data-grade="' + c.key + '"]');
+      const raw = inp ? inp.value : '';
+      if (raw !== '') anyEntered = true;
+      let v = parseFloat(raw);
+      if (isNaN(v)) v = 0;
+      v = Math.max(0, Math.min(100, v));
+      scores[c.key] = v;
+      store[c.key] = (raw !== '') ? raw : '';
+    });
+
+    // per-CLO scores + course total
+    let total = 0;
+    const cloScores = this.clos.map((clo) => {
+      let s = 0;
+      this.comps.forEach((c) => { s += scores[c.key] * (clo.w[c.key] || 0) / 100; });
+      total += s * clo.weight / 100;
+      return Math.round(s * 10) / 10;
+    });
+    total = Math.round(total * 10) / 10;
+
+    // ring + total
+    const ring = this.rootEl.querySelector('[data-ring]');
+    if (ring) ring.style.background = 'conic-gradient(var(--accent) 0 ' + total + '%, rgba(255,255,255,0.12) ' + total + '% 100%)';
+    const te = this.rootEl.querySelector('[data-total]');
+    if (te) te.textContent = total.toFixed(1);
+
+    // grade
+    const g = this.gradeFor(total);
+    const le = this.rootEl.querySelector('[data-letter]');
+    if (le) { le.textContent = g.letter; le.style.color = g.color; }
+    const ge = this.rootEl.querySelector('[data-gpa]');
+    if (ge) ge.textContent = g.gpa;
+    const ae = this.rootEl.querySelector('[data-achievement]');
+    if (ae) ae.textContent = anyEntered ? g.level : 'Enter your marks to see your result.';
+
+    this.renderClos(cloScores);
+    this.lsSet('ma2-student-grades', store);
+  }
+
+  renderClos(cloScores) {
+    const el = this.rootEl.querySelector('[data-clo-list]');
+    if (!el) return;
+    let h = '';
+    this.clos.forEach((clo, i) => {
+      const s = cloScores[i];
+      const last = i === this.clos.length - 1;
+      h += '<div style="padding:14px 0;' + (last ? '' : 'border-bottom:1px solid #eceadf;') + '">'
+        + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:9px;flex-wrap:wrap;">'
+        + '<span style="flex-shrink:0;font-family:\'Schibsted Grotesk\';font-weight:800;font-size:11px;letter-spacing:.04em;color:var(--accent-deep);background:var(--accent-soft);border:1px solid #e0d3b6;padding:4px 9px;border-radius:7px;">' + clo.code + '</span>'
+        + '<span style="flex:1;min-width:160px;font-size:14.5px;font-weight:600;color:#16293f;">' + this.esc(clo.name) + '</span>'
+        + '<span style="font-size:12.5px;font-weight:600;color:#8a8678;white-space:nowrap;">weight ' + clo.weight + '%</span>'
+        + '<span style="font-family:\'Schibsted Grotesk\';font-weight:800;font-size:16px;color:#16293f;min-width:56px;text-align:right;">' + s.toFixed(1) + '%</span>'
+        + '</div>'
+        + '<div style="height:7px;background:#eceadf;border-radius:99px;overflow:hidden;">'
+        + '<div style="height:100%;width:' + Math.max(0, Math.min(100, s)) + '%;background:var(--accent);border-radius:99px;transition:width .3s ease;"></div>'
+        + '</div>'
+        + '</div>';
+    });
+    el.innerHTML = h;
+  }
+
+  gradeFor(t) {
+    if (t >= 90) return { letter: 'A', gpa: '4.00', level: 'Exceptional achievement', color: '#48c39a' };
+    if (t >= 80) return { letter: 'B', gpa: '3.00', level: 'Good extensive achievement', color: '#7fb2e6' };
+    if (t >= 70) return { letter: 'C', gpa: '2.00', level: 'Expected acceptable achievement', color: 'var(--accent)' };
+    if (t >= 60) return { letter: 'D', gpa: '1.00', level: 'Minimum acceptable achievement', color: '#e0b25e' };
+    return { letter: 'NY', gpa: '0.00', level: 'Not Yet satisfactorily proven achievement', color: '#e08a92' };
+  }
+
+  /* ---------- STUDY CHECKLIST ---------- */
+  initChecklist() {
+    const KEY = 'ma2-study-checklist';
+    const applyBoxStyle = (box) => {
+      const row = box.closest('label');
+      const vis = box.parentElement; // data-check-box span
+      const icon = vis ? vis.querySelector('[data-check-icon]') : null;
+      const span = row ? row.querySelector('span:last-child') : null;
+      if (box.checked) {
+        if (vis) { vis.style.background = 'var(--accent)'; vis.style.borderColor = 'var(--accent)'; }
+        if (icon) { icon.style.opacity = '1'; icon.style.transform = 'scale(1)'; }
+        if (span) { span.style.textDecoration = 'line-through'; span.style.color = '#a9a293'; }
+        if (row) row.style.background = 'rgba(176,141,79,0.08)';
+      } else {
+        if (vis) { vis.style.background = '#fff'; vis.style.borderColor = '#d6d1c4'; }
+        if (icon) { icon.style.opacity = '0'; icon.style.transform = 'scale(.4)'; }
+        if (span) { span.style.textDecoration = 'none'; span.style.color = '#3a4550'; }
+        if (row) row.style.background = 'transparent';
+      }
+    };
+    const saved = this.lsGet(KEY) || {};
+    const boxes = Array.from(this.rootEl.querySelectorAll('[data-check]'));
+    boxes.forEach((box) => {
+      box.checked = !!saved[box.getAttribute('data-check')];
+      applyBoxStyle(box);
+      box.addEventListener('change', () => {
+        const s = this.lsGet(KEY) || {};
+        const id = box.getAttribute('data-check');
+        if (box.checked) s[id] = 1; else delete s[id];
+        this.lsSet(KEY, s);
+        applyBoxStyle(box);
+        this.updateChecklistProgress();
+      });
+    });
+    const reset = this.rootEl.querySelector('[data-check-reset]');
+    if (reset) reset.addEventListener('click', () => {
+      this.lsSet(KEY, {});
+      boxes.forEach((b) => { b.checked = false; applyBoxStyle(b); });
+      this.updateChecklistProgress();
+    });
+    this.updateChecklistProgress();
+  }
+  updateChecklistProgress() {
+    const boxes = Array.from(this.rootEl.querySelectorAll('[data-check]'));
+    const total = boxes.length;
+    const done = boxes.filter((b) => b.checked).length;
+    const pct = total ? Math.round(done / total * 100) : 0;
+
+    const RING_C = 238.76;
+    const ring = this.rootEl.querySelector('[data-check-ring]');
+    if (ring) ring.style.strokeDashoffset = (RING_C - (pct / 100) * RING_C).toFixed(2);
+    const label = this.rootEl.querySelector('[data-check-label]');
+    if (label) label.textContent = done + ' of ' + total + ' steps complete';
+    const pctEl = this.rootEl.querySelector('[data-check-pct]');
+    if (pctEl) pctEl.textContent = pct + '%';
+    const sub = this.rootEl.querySelector('[data-check-sub]');
+    if (sub) {
+      sub.textContent = pct === 100
+        ? 'All steps complete — you\'re exam ready. Nice work.'
+        : 'Tick items off as you work through each chapter — your progress is saved on this device.';
+    }
+
+    this.rootEl.querySelectorAll('[data-check-group]').forEach((group) => {
+      const gBoxes = Array.from(group.querySelectorAll('[data-check]'));
+      const gDone = gBoxes.filter((b) => b.checked).length;
+      const badge = group.querySelector('[data-group-badge]');
+      const complete = gBoxes.length > 0 && gDone === gBoxes.length;
+      if (badge) {
+        badge.textContent = gDone + '/' + gBoxes.length;
+        badge.style.background = complete ? 'var(--accent)' : '#f5f4ef';
+        badge.style.color = complete ? '#fff' : '#8a8678';
+      }
+      group.style.borderColor = complete ? 'var(--accent)' : '#e4e0d6';
+    });
+  }
+
+  /* ---------- SCIENTIFIC CALCULATOR ---------- */
+  initCalc() {
+    const pad = this.rootEl.querySelector('[data-calc-pad]');
+    if (!pad) return;
+    this.calcTokens = [];
+    this.calcDeg = true;
+    this.calcJustEval = false;
+    this.calcSmall = '';
+
+    const mainEl = this.rootEl.querySelector('[data-calc-main]');
+    const smallEl = this.rootEl.querySelector('[data-calc-small]');
+    const degBtn = this.rootEl.querySelector('[data-calc-deg]');
+
+    const paintCalc = () => {
+      const disp = this.calcTokens.map((t) => t.disp).join('');
+      mainEl.textContent = disp === '' ? '0' : disp;
+      smallEl.textContent = this.calcSmall || '\u00a0';
+      if (degBtn) degBtn.textContent = this.calcDeg ? 'DEG' : 'RAD';
+    };
+
+    const startsValue = (val, isNum) => isNum || val === '(' || /\($/.test(val) || val === 'PI' || val === 'E';
+    const endsValue = (t) => t.num || t.disp === ')' || t.val === 'PI' || t.val === 'E';
+
+    const pushToken = (disp, val, isNum) => {
+      if (this.calcJustEval) {
+        if (isNum) { this.calcTokens = []; } // start fresh number after result
+        this.calcJustEval = false;
+        this.calcSmall = '';
+      }
+      const last = this.calcTokens[this.calcTokens.length - 1];
+      if (isNum && last && last.num) {
+        if (disp === '.' && last.disp.includes('.')) return; // one decimal point
+        last.disp += disp; last.val += val;
+        paintCalc();
+        return;
+      }
+      let finalVal = val;
+      if (startsValue(val, isNum) && last && endsValue(last)) finalVal = '*' + val;
+      this.calcTokens.push({ disp, val: finalVal, num: !!isNum });
+      paintCalc();
+    };
+
+    const doClear = () => { this.calcTokens = []; this.calcSmall = ''; this.calcJustEval = false; paintCalc(); };
+    const doBack = () => {
+      const last = this.calcTokens[this.calcTokens.length - 1];
+      if (!last) return;
+      if (last.num && last.disp.length > 1) { last.disp = last.disp.slice(0, -1); last.val = last.val.slice(0, -1); }
+      else this.calcTokens.pop();
+      paintCalc();
+    };
+    const doEquals = () => {
+      if (!this.calcTokens.length) return;
+      const dispExpr = this.calcTokens.map((t) => t.disp).join('');
+      let evalExpr = this.calcTokens.map((t) => t.val).join('');
+      const openCount = (evalExpr.match(/\(/g) || []).length;
+      const closeCount = (evalExpr.match(/\)/g) || []).length;
+      if (openCount > closeCount) evalExpr += ')'.repeat(openCount - closeCount);
+      const deg = this.calcDeg;
+      const sin = (x) => Math.sin(deg ? (x * Math.PI) / 180 : x);
+      const cos = (x) => Math.cos(deg ? (x * Math.PI) / 180 : x);
+      const tan = (x) => Math.tan(deg ? (x * Math.PI) / 180 : x);
+      let result;
+      try {
+        // eslint-disable-next-line no-new-func
+        result = Function('sin', 'cos', 'tan', 'sqrt', 'ln', 'log', 'PI', 'E', 'return (' + evalExpr + ')')(sin, cos, tan, Math.sqrt, Math.log, Math.log10, Math.PI, Math.E);
+        if (typeof result !== 'number' || !isFinite(result)) throw new Error('bad result');
+        result = Math.round(result * 1e10) / 1e10;
+      } catch (e) {
+        this.calcTokens = [];
+        this.calcSmall = '';
+        mainEl.textContent = 'Error';
+        smallEl.textContent = dispExpr;
+        this.calcJustEval = true;
+        return;
+      }
+      this.calcSmall = dispExpr + ' =';
+      this.calcTokens = [{ disp: String(result), val: String(result), num: true }];
+      this.calcJustEval = true;
+      paintCalc();
+    };
+
+    pad.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      const action = btn.getAttribute('data-action');
+      const num = btn.getAttribute('data-num');
+      if (action === 'clear') return doClear();
+      if (action === 'back') return doBack();
+      if (action === 'equals') return doEquals();
+      if (num != null) return pushToken(num, num, true);
+      const disp = btn.getAttribute('data-disp');
+      const val = btn.getAttribute('data-val');
+      if (disp != null) pushToken(disp, val, false);
+    });
+
+    if (degBtn) degBtn.addEventListener('click', () => { this.calcDeg = !this.calcDeg; paintCalc(); });
+
+    paintCalc();
+  }
+
+  renderVals() { return { setRoot: (el) => { this.rootEl = el; } }; }
+}
+</script>
+</body>
+</html>
